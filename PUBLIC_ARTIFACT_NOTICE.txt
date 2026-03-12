@@ -1,0 +1,4 @@
+This Maven Central artifact ships placeholder sources and javadoc archives.
+
+The published binaries are intended for public consumption, but the full source
+for this module is not distributed through Maven Central.

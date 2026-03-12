@@ -1,0 +1,13 @@
+# Copy the secret values you need into ~/.gradle/gradle.properties
+# or configure them as GitHub Actions secrets.
+
+centralPortalUsername=your-central-portal-token-username
+centralPortalPassword=your-central-portal-token-password
+signingKey=-----BEGIN PGP PRIVATE KEY BLOCK-----
+...
+-----END PGP PRIVATE KEY BLOCK-----
+signingPassword=your-signing-password
+
+publicMavenReleaseUrl=https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/
+publicMavenSnapshotUrl=https://central.sonatype.com/repository/maven-snapshots/
+
