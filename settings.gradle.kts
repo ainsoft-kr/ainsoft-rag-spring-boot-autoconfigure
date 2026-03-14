@@ -13,6 +13,4 @@ dependencyResolutionManagement {
     }
 }
 
-includeBuild("../ainsoft-rag-engine")
-
 rootProject.name = "ainsoft-rag-spring-boot-autoconfigure"

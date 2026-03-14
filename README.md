@@ -48,6 +48,16 @@ rag:
 ./gradlew build
 ```
 
+로컬에서 엔진을 배포 없이 소비하려면 먼저 [ainsoft-rag-engine](/Users/ygpark2/pjt/ainsoft/rag/ainsoft-rag-engine) 을 `mavenLocal()`에 publish 해야 합니다.
+
+```bash
+cd ../ainsoft-rag-engine
+./gradlew publishPublicModulesToMavenLocal
+
+cd ../ainsoft-rag-spring-boot-autoconfigure
+./gradlew build
+```
+
 ## Publishing
 
 snapshot:
@@ -63,6 +73,18 @@ release:
 ```
 
 `sources.jar`와 `javadoc.jar`는 Maven Central 요구사항 충족용 placeholder archive로 배포됩니다.
+
+## Local Maven Flow
+
+엔진 snapshot을 로컬 Maven 저장소에 올린 뒤 이 프로젝트를 publish 하면, starter가 같은 좌표를 다시 소비할 수 있습니다.
+
+```bash
+cd ../ainsoft-rag-engine
+./gradlew publishPublicModulesToMavenLocal
+
+cd ../ainsoft-rag-spring-boot-autoconfigure
+./gradlew publishToMavenLocal
+```
 
 필요한 로컬 설정 예시는 `gradle.properties.template`에 있습니다.
 
