@@ -17,6 +17,30 @@ implementation("com.ainsoft.rag:ainsoft-rag-spring-boot-autoconfigure:0.1.0")
 - 기본 `EmbeddingProvider`, `Chunker`, `RagEngine` 빈 구성
 - stats cache/file cache 빈 구성
 - provider health auto export lifecycle 구성
+- servlet 웹 애플리케이션용 `RagAdminAutoConfiguration`
+- 공통 관리자 UI `/rag-admin`
+- 공통 운영 API `/api/rag/admin`
+
+## Admin UI
+
+관리자 UI는 servlet 기반 Spring Boot 웹 애플리케이션에서 자동 활성화됩니다.
+
+```yaml
+rag:
+  admin:
+    enabled: true
+    basePath: /rag-admin
+    apiBasePath: /api/rag/admin
+    defaultRecentProviderWindowMillis: 60000
+```
+
+비활성화:
+
+```yaml
+rag:
+  admin:
+    enabled: false
+```
 
 ## Build
 

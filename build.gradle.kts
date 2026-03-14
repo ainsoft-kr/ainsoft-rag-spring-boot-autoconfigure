@@ -40,16 +40,20 @@ dependencies {
     api("com.ainsoft.rag:core:$engineVersion")
     api("com.ainsoft.rag:chunkers:$engineVersion")
     api("com.ainsoft.rag:embeddings-api:$engineVersion")
+    implementation("com.ainsoft.rag:parsers-api:$engineVersion")
     api("com.ainsoft.rag:stats-cache-spi:$engineVersion")
     api("com.ainsoft.rag:stats-cache-file:$engineVersion")
     runtimeOnly("com.ainsoft.rag:reranker-onnx:$engineVersion")
 
     api("org.springframework.boot:spring-boot-autoconfigure:3.3.2")
+    compileOnly("org.springframework.boot:spring-boot-starter-web:3.3.2")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")
 
     kapt("org.springframework.boot:spring-boot-configuration-processor:3.3.2")
 
     testImplementation(kotlin("test"))
+    testImplementation("org.springframework.boot:spring-boot-starter-test:3.3.2")
+    testImplementation("org.springframework.boot:spring-boot-starter-web:3.3.2")
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
