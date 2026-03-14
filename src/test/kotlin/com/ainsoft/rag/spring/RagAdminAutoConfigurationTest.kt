@@ -56,6 +56,8 @@ class RagAdminAutoConfigurationTest {
                 assertTrue(html.contains("\"basePath\":\"/console/rag\""))
                 assertTrue(html.contains("\"apiBasePath\":\"/internal/rag-admin\""))
                 assertTrue(html.contains("\"defaultRecentProviderWindowMillis\":12345"))
+                assertTrue(html.contains("href=\"/console/rag/assets/app.css\""))
+                assertTrue(html.contains("src=\"/console/rag/assets/app.js\""))
             }
     }
 

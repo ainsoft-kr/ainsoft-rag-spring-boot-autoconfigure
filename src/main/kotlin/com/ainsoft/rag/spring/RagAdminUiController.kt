@@ -71,7 +71,11 @@ class RagAdminUiController(
 
     private fun renderPage(pageName: String, request: HttpServletRequest): String {
         securityService.requireFeature(request, pageFeatures.getValue(pageName))
-        return loadTemplate(pageName).replace("__RAG_ADMIN_CONFIG__", adminConfigJson(request))
+        val assetBasePath = "${normalizePath(properties.basePath)}/assets"
+        return loadTemplate(pageName)
+            .replace("href=\"assets/", "href=\"$assetBasePath/")
+            .replace("src=\"assets/", "src=\"$assetBasePath/")
+            .replace("__RAG_ADMIN_CONFIG__", adminConfigJson(request))
     }
 
     private fun loadTemplate(pageName: String): String =
