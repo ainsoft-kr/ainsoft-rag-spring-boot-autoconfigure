@@ -7,28 +7,56 @@
     <link rel="stylesheet" href="assets/app.css" />
   </head>
   <body data-page="overview">
-    <main>
-      <section class="hero">
-        <div class="hero-top">
+    <main class="dashboard-shell">
+      <aside class="sidebar">
+        <section class="brand">
+          <span class="brand-mark">RA</span>
           <div>
-            <span class="eyebrow">Overview</span>
-            <h1>RAG Admin Console</h1>
-            <p class="lead">
-              starter 공통 기능으로 문서 탐색, tenant 운영, provider 이력, 검색 감사, job 이력,
-              접근 보안, 설정 확인, bulk 작업까지 제공하는 운영 콘솔입니다.
-            </p>
+            <div class="brand-title">RAG Admin</div>
+            <p class="brand-copy">Starter-embedded operations workspace for retrieval, ingest, audit, and platform controls.</p>
           </div>
-          <div class="badge-row">
+        </section>
+
+        <section class="sidebar-panel">
+          <p class="sidebar-kicker">Workspace Pulse</p>
+          <div class="sidebar-metric">
+            <strong id="shell-tenant">tenant-admin</strong>
+            <span>Active tenant scope</span>
+          </div>
+          <div class="sidebar-metric">
+            <strong id="shell-role">ADMIN</strong>
+            <span>Current admin role</span>
+          </div>
+          <div class="sidebar-metric">
+            <strong id="shell-window">60000 ms</strong>
+            <span>Provider telemetry window</span>
+          </div>
+        </section>
+
+        <nav class="nav-menu"></nav>
+
+        <section class="sidebar-panel">
+          <p class="sidebar-kicker">Finance Board Style</p>
+          <p class="brand-copy">Bright card canvas, sectional sidebar, and metric-first headers tuned for operational monitoring.</p>
+        </section>
+      </aside>
+
+      <section class="content-area">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">Overview</p>
+            <h1>Control Tower</h1>
+            <p class="lead">실시간 인덱스 상태, provider health, 공통 기능 지도를 한 화면에 요약한 메인 보드입니다.</p>
+          </div>
+          <div class="header-badges">
             <span class="badge" id="badge-base"></span>
             <span class="badge" id="badge-api"></span>
             <span class="badge" id="badge-window"></span>
             <span class="badge" id="badge-role"></span>
           </div>
-        </div>
+        </header>
 
-        <nav class="nav-menu"></nav>
-
-        <div class="stats">
+        <section class="stats">
           <div class="stat">
             Tenant
             <strong id="stat-tenant">-</strong>
@@ -41,81 +69,102 @@
             Indexed Chunks
             <strong id="stat-chunks">0</strong>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section class="grid">
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>Workspace Context</h2>
-              <p>다른 페이지와 공유되는 tenant 및 recent provider window 설정입니다.</p>
-            </div>
-          </div>
-          <div class="stack">
-            <div class="dual">
-              <label>
-                Tenant ID
-                <input data-context="tenantId" value="tenant-admin" />
-              </label>
-              <label>
-                Recent Provider Window (ms)
-                <input data-context="recentProviderWindowMillis" type="number" value="60000" />
-              </label>
-            </div>
-            <div class="actions">
-              <button id="btn-stats">Refresh Stats</button>
-              <button class="secondary" id="btn-health">Provider Health</button>
-            </div>
-            <div class="notice" id="overview-notice"></div>
-          </div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>Feature Map</h2>
-              <p>페이지 구조를 한눈에 보는 빠른 가이드입니다.</p>
-            </div>
-          </div>
-          <div class="feature-grid">
-            <div class="feature-card">
-              <h3>Documents</h3>
-              <p>문서 목록, 상세, ACL/metadata, 삭제, 재색인, source preview.</p>
-            </div>
-            <div class="feature-card">
-              <h3>Tenants &amp; Index Ops</h3>
-              <p>tenant별 통계와 snapshot, restore, optimize, metadata rebuild.</p>
-            </div>
-            <div class="feature-card">
-              <h3>Audit &amp; History</h3>
-              <p>search audit, job history, provider history, fallback 이벤트 추적.</p>
-            </div>
-            <div class="feature-card">
-              <h3>Security &amp; Config</h3>
-              <p>역할별 메뉴, 접근 감사, rag.* 설정 조회, bulk 작업 수행.</p>
-            </div>
-          </div>
-        </article>
-
-        <article class="panel full">
-          <div class="panel-header">
-            <div>
-              <h2>Outputs</h2>
-              <p>Overview는 인덱스 통계와 provider health를 중심으로 현재 상태를 보여 줍니다.</p>
-            </div>
-          </div>
-          <div class="grid">
-            <div class="stack">
-              <strong>Stats</strong>
-              <pre id="output-stats">{}</pre>
+        <section class="grid">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Workspace Filters</h2>
+                <p>모든 페이지에서 공유되는 tenant와 recent provider window를 관리합니다.</p>
+              </div>
             </div>
             <div class="stack">
-              <strong>Provider Health</strong>
-              <pre id="output-health">{}</pre>
+              <div class="dual">
+                <label>
+                  Tenant ID
+                  <input data-context="tenantId" value="tenant-admin" />
+                </label>
+                <label>
+                  Recent Provider Window (ms)
+                  <input data-context="recentProviderWindowMillis" type="number" value="60000" />
+                </label>
+              </div>
+              <div class="actions">
+                <button id="btn-stats">Refresh Stats</button>
+                <button class="secondary" id="btn-health">Provider Health</button>
+              </div>
+              <div class="notice" id="overview-notice"></div>
             </div>
-          </div>
-        </article>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Board Modules</h2>
+                <p>문서 탐색부터 검색 감사, 접근 보안까지 주요 기능을 빠르게 파악합니다.</p>
+              </div>
+            </div>
+            <div class="feature-grid">
+              <div class="feature-card">
+                <h3>Retrieval</h3>
+                <p>Search, Documents, Source Preview.</p>
+              </div>
+              <div class="feature-card">
+                <h3>Operations</h3>
+                <p>Tenant metrics, snapshot, restore, optimize.</p>
+              </div>
+              <div class="feature-card">
+                <h3>Audit</h3>
+                <p>Provider history, search audit, job trail.</p>
+              </div>
+              <div class="feature-card">
+                <h3>Security</h3>
+                <p>Role-aware navigation, access audit, config inspector.</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header">
+              <div>
+                <h2>Analytics Strip</h2>
+                <p>인덱스 크기, snapshot 수, cache hit rate, provider endpoint 상태를 시각적으로 요약합니다.</p>
+              </div>
+            </div>
+            <div class="analytic-grid" id="overview-analytics"></div>
+            <div id="overview-endpoints"></div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header">
+              <div>
+                <h2>Telemetry Feed</h2>
+                <p>Overview는 인덱스 통계와 provider health를 동시에 표시합니다.</p>
+              </div>
+            </div>
+            <div class="grid">
+              <div class="stack">
+                <strong>Stats</strong>
+                <pre id="output-stats">{}</pre>
+              </div>
+              <div class="stack">
+                <strong>Provider Health</strong>
+                <pre id="output-health">{}</pre>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Recent Activity</h2>
+                <p>최근 search audit과 job history를 혼합한 운영 activity tape입니다.</p>
+              </div>
+            </div>
+            <div id="overview-activity"></div>
+          </article>
+        </section>
       </section>
     </main>
 

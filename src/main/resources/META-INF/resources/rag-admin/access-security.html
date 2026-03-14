@@ -7,85 +7,62 @@
     <link rel="stylesheet" href="assets/app.css" />
   </head>
   <body data-page="access-security">
-    <main>
-      <section class="hero">
-        <div class="hero-top">
-          <div>
-            <span class="eyebrow">Access &amp; Security</span>
-            <h1>Access &amp; Security</h1>
-            <p class="lead">
-              admin UI 접근 제어, 역할별 기능 노출, 최근 접근 감사 로그를 조회합니다.
-            </p>
-          </div>
-          <div class="badge-row">
-            <span class="badge" id="badge-base"></span>
-            <span class="badge" id="badge-api"></span>
-            <span class="badge" id="badge-window"></span>
-            <span class="badge" id="badge-role"></span>
-          </div>
-        </div>
-
+    <main class="dashboard-shell">
+      <aside class="sidebar">
+        <section class="brand"><span class="brand-mark">RA</span><div><div class="brand-title">RAG Admin</div><p class="brand-copy">Role-aware access board with feature policies and access audit.</p></div></section>
+        <section class="sidebar-panel">
+          <p class="sidebar-kicker">Security Scope</p>
+          <div class="sidebar-metric"><strong id="shell-tenant">tenant-admin</strong><span>Session tenant</span></div>
+          <div class="sidebar-metric"><strong id="shell-role">ADMIN</strong><span>Detected role</span></div>
+          <div class="sidebar-metric"><strong id="shell-window">60000 ms</strong><span>Telemetry window</span></div>
+        </section>
         <nav class="nav-menu"></nav>
-      </section>
+      </aside>
 
-      <section class="grid">
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>Session Context</h2>
-              <p>현재 role과 token 전달 방식을 확인합니다.</p>
-            </div>
-          </div>
-          <div class="stack">
-            <label>
-              Access Token
-              <input data-context="accessToken" placeholder="security enabled 시 사용" />
-            </label>
-            <p class="helper">Current Role: <strong id="access-current-role" class="mono">-</strong></p>
-            <p class="helper">Token Header: <strong id="access-token-header" class="mono">-</strong></p>
-            <p class="helper">Token Query Param: <strong id="access-token-query" class="mono">-</strong></p>
-            <div class="actions">
-              <button id="btn-access-refresh">Refresh Access Security</button>
-            </div>
-            <div class="notice" id="access-notice"></div>
-          </div>
-        </article>
+      <section class="content-area">
+        <header class="page-header">
+          <div><p class="eyebrow">Access &amp; Security</p><h1>Security Board</h1><p class="lead">admin UI 접근 제어, 역할별 기능 매핑, 최근 접근 감사 로그를 한 보드에서 확인합니다.</p></div>
+          <div class="header-badges"><span class="badge" id="badge-base"></span><span class="badge" id="badge-api"></span><span class="badge" id="badge-window"></span><span class="badge" id="badge-role"></span></div>
+        </header>
 
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>Feature Roles</h2>
-              <p>feature별 허용 role 매핑입니다.</p>
+        <section class="grid">
+          <article class="panel">
+            <div class="panel-header"><div><h2>Session Context</h2><p>현재 role과 token 전달 방식을 표시합니다.</p></div></div>
+            <div class="stack">
+              <label>Access Token<input data-context="accessToken" placeholder="security enabled 시 사용" /></label>
+              <p class="helper">Current Role: <strong id="access-current-role" class="mono">-</strong></p>
+              <p class="helper">Token Header: <strong id="access-token-header" class="mono">-</strong></p>
+              <p class="helper">Token Query Param: <strong id="access-token-query" class="mono">-</strong></p>
+              <div class="actions"><button id="btn-access-refresh">Refresh Access Security</button></div>
+              <div class="notice" id="access-notice"></div>
             </div>
-          </div>
-          <div id="access-feature-table"></div>
-        </article>
+          </article>
 
-        <article class="panel full">
-          <div class="panel-header">
-            <div>
-              <h2>Access Audit</h2>
-              <p>최근 접근 성공/실패 내역입니다.</p>
-            </div>
-          </div>
-          <div id="access-audit-table"></div>
-        </article>
+          <article class="panel">
+            <div class="panel-header"><div><h2>Feature Roles</h2><p>feature별 허용 role 매핑입니다.</p></div></div>
+            <div id="access-feature-table"></div>
+          </article>
 
-        <article class="panel full">
-          <div class="panel-header">
-            <div>
-              <h2>Output</h2>
-              <p>access/security 응답 전문입니다.</p>
-            </div>
-          </div>
-          <pre id="output-access-security">{}</pre>
-        </article>
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Security Summary</h2><p>허용 role 수, 감사 승인율, 역할-기능 매트릭스를 시각적으로 표시합니다.</p></div></div>
+            <div class="analytic-grid" id="access-analytics"></div>
+            <div id="role-matrix"></div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Access Audit</h2><p>최근 접근 성공/실패 내역입니다.</p></div></div>
+            <div id="access-audit-table"></div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Output</h2><p>access/security 응답 전문입니다.</p></div></div>
+            <pre id="output-access-security">{}</pre>
+          </article>
+        </section>
       </section>
     </main>
 
-    <script>
-      window.RAG_ADMIN_CONFIG = __RAG_ADMIN_CONFIG__;
-    </script>
+    <script>window.RAG_ADMIN_CONFIG = __RAG_ADMIN_CONFIG__;</script>
     <script src="assets/app.js"></script>
   </body>
 </html>

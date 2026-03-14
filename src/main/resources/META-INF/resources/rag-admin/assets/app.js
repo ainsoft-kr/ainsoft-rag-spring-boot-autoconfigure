@@ -11,18 +11,18 @@
   };
 
   const routes = [
-    { route: "overview", feature: "overview", label: "Overview" },
-    { route: "search", feature: "search", label: "Search" },
-    { route: "text-ingest", feature: "text-ingest", label: "Text Ingest" },
-    { route: "file-ingest", feature: "file-ingest", label: "File Ingest" },
-    { route: "documents", feature: "documents", label: "Documents" },
-    { route: "tenants", feature: "tenants", label: "Tenants & Index Ops" },
-    { route: "provider-history", feature: "provider-history", label: "Provider History" },
-    { route: "search-audit", feature: "search-audit", label: "Search Audit" },
-    { route: "job-history", feature: "job-history", label: "Job History" },
-    { route: "access-security", feature: "access-security", label: "Access & Security" },
-    { route: "config", feature: "config", label: "Config" },
-    { route: "bulk-operations", feature: "bulk-operations", label: "Bulk Ops" }
+    { route: "overview", feature: "overview", label: "Overview", caption: "Live board", section: "Monitor", board: "Control Tower" },
+    { route: "provider-history", feature: "provider-history", label: "Provider History", caption: "Latency and fallback", section: "Monitor", board: "Provider Telemetry" },
+    { route: "search-audit", feature: "search-audit", label: "Search Audit", caption: "Query trail", section: "Monitor", board: "Audit Tape" },
+    { route: "job-history", feature: "job-history", label: "Job History", caption: "Runbook queue", section: "Monitor", board: "Execution Tape" },
+    { route: "search", feature: "search", label: "Search", caption: "Diagnostic retrieval", section: "Retrieval", board: "Search Desk" },
+    { route: "documents", feature: "documents", label: "Documents", caption: "Browser and preview", section: "Retrieval", board: "Document Ledger" },
+    { route: "text-ingest", feature: "text-ingest", label: "Text Ingest", caption: "Direct upsert", section: "Ingest", board: "Manual Ingest" },
+    { route: "file-ingest", feature: "file-ingest", label: "File Ingest", caption: "Upload pipeline", section: "Ingest", board: "Upload Ingest" },
+    { route: "bulk-operations", feature: "bulk-operations", label: "Bulk Ops", caption: "Batch changes", section: "Ingest", board: "Batch Operations" },
+    { route: "tenants", feature: "tenants", label: "Tenants & Index Ops", caption: "Snapshot and optimize", section: "Operations", board: "Tenant Operations" },
+    { route: "config", feature: "config", label: "Config", caption: "Read-only settings", section: "Operations", board: "Configuration Board" },
+    { route: "access-security", feature: "access-security", label: "Access & Security", caption: "Roles and audit", section: "Operations", board: "Security Board" }
   ];
   const storageKey = "rag-admin-shared-context";
 
@@ -130,6 +130,7 @@
       const syncContext = () => {
         readContext();
         setupNavigation();
+        updateShellMeta();
       };
       node.addEventListener("change", syncContext);
       node.addEventListener("blur", syncContext);
@@ -151,6 +152,7 @@
         ? `Role ${config.currentRole || "ANONYMOUS"}`
         : "Security Disabled";
     }
+    updateShellMeta();
   }
 
   function hasFeature(feature) {
@@ -172,24 +174,149 @@
     return decoratePath(path);
   }
 
+  function currentRouteMeta() {
+    const page = document.body.dataset.page || "overview";
+    return routes.find((route) => route.route === page) || routes[0];
+  }
+
   function setupNavigation() {
     const page = document.body.dataset.page || "overview";
     document.querySelectorAll(".nav-menu").forEach((nav) => {
       nav.replaceChildren();
-      routes.forEach((route) => {
-        if (!hasFeature(route.feature)) {
-          return;
-        }
-        const link = document.createElement("a");
-        link.className = "nav-link";
-        link.href = routeUrl(route.route);
-        link.textContent = route.label;
-        if (route.route === page) {
-          link.classList.add("active");
-        }
-        nav.appendChild(link);
+      const visibleRoutes = routes.filter((route) => hasFeature(route.feature));
+      const groups = visibleRoutes.reduce((acc, route) => {
+        acc[route.section] = acc[route.section] || [];
+        acc[route.section].push(route);
+        return acc;
+      }, {});
+      Object.entries(groups).forEach(([section, sectionRoutes]) => {
+        const group = document.createElement("div");
+        group.className = "nav-group";
+
+        const title = document.createElement("div");
+        title.className = "nav-group-title";
+        title.textContent = section;
+        group.appendChild(title);
+
+        sectionRoutes.forEach((route) => {
+          const link = document.createElement("a");
+          link.className = "nav-link";
+          link.href = routeUrl(route.route);
+          if (route.route === page) {
+            link.classList.add("active");
+          }
+
+          const heading = document.createElement("span");
+          heading.className = "nav-link-title";
+          heading.textContent = route.label;
+          link.appendChild(heading);
+
+          const meta = document.createElement("span");
+          meta.className = "nav-link-meta";
+          meta.textContent = route.caption;
+          link.appendChild(meta);
+
+          group.appendChild(link);
+        });
+
+        nav.appendChild(group);
       });
     });
+  }
+
+  function updateShellMeta() {
+    const context = loadContext();
+    setText("shell-role", config.currentRole || "ANONYMOUS");
+    setText("shell-tenant", context.tenantId || "-");
+    setText("shell-window", `${context.recentProviderWindowMillis || 0} ms`);
+  }
+
+  function renderTrendBars(values) {
+    const trend = document.createElement("div");
+    trend.className = "strip-trend";
+    values.forEach((value) => {
+      const bar = document.createElement("span");
+      bar.style.height = `${value}px`;
+      trend.appendChild(bar);
+    });
+    return trend;
+  }
+
+  function decorateContentShell() {
+    const area = document.querySelector(".content-area");
+    if (!area || area.querySelector(".topbar")) {
+      return;
+    }
+
+    const route = currentRouteMeta();
+    const topbar = document.createElement("section");
+    topbar.className = "topbar";
+    topbar.innerHTML = `
+      <div class="topbar-copy">
+        <span class="topbar-label">${route.section}</span>
+        <div class="topbar-title">${route.board} / ${route.label}</div>
+      </div>
+      <div class="topbar-meta">
+        <span class="topbar-pill">Starter Embedded</span>
+        <span class="topbar-pill">Feature ${route.feature}</span>
+        <span class="topbar-pill">${config.securityEnabled ? "Protected" : "Open Access"}</span>
+      </div>
+    `;
+
+    const strip = document.createElement("section");
+    strip.className = "market-strip";
+    const context = loadContext();
+    const metrics = [
+      {
+        label: "Tenant Scope",
+        value: context.tenantId || "-",
+        foot: "Shared across pages",
+        trend: [20, 28, 24, 34, 40, 36]
+      },
+      {
+        label: "Feature Access",
+        value: String((config.allowedFeatures || []).length),
+        foot: "Visible menu entries",
+        trend: [18, 22, 26, 24, 30, 34]
+      },
+      {
+        label: "Role State",
+        value: config.currentRole || "OPEN",
+        foot: config.securityEnabled ? "Security enabled" : "Security disabled",
+        trend: [16, 20, 18, 24, 28, 32]
+      },
+      {
+        label: "Provider Window",
+        value: `${context.recentProviderWindowMillis || 0} ms`,
+        foot: "Telemetry horizon",
+        trend: [12, 16, 20, 28, 26, 30]
+      }
+    ];
+
+    metrics.forEach((metric) => {
+      const card = document.createElement("article");
+      card.className = "strip-card";
+
+      const head = document.createElement("div");
+      head.className = "strip-card-head";
+      head.innerHTML = `<span>${metric.label}</span><span>${route.section}</span>`;
+      card.appendChild(head);
+
+      const strong = document.createElement("strong");
+      strong.textContent = metric.value;
+      card.appendChild(strong);
+      card.appendChild(renderTrendBars(metric.trend));
+
+      const foot = document.createElement("div");
+      foot.className = "strip-foot";
+      foot.textContent = metric.foot;
+      card.appendChild(foot);
+
+      strip.appendChild(card);
+    });
+
+    area.prepend(strip);
+    area.prepend(topbar);
   }
 
   async function request(path, options) {
@@ -225,10 +352,87 @@
     return payload;
   }
 
+  function humanizeId(value) {
+    return String(value || "")
+      .replace(/^output-/, "")
+      .replace(/-/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  function ensureJsonShell(target) {
+    if (!target || !target.parentElement) {
+      return null;
+    }
+    let shell = target.closest(".json-shell");
+    if (shell) {
+      return shell;
+    }
+    shell = document.createElement("div");
+    shell.className = "json-shell";
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "json-toolbar";
+
+    const title = document.createElement("div");
+    title.className = "json-title";
+    title.textContent = humanizeId(target.id);
+    toolbar.appendChild(title);
+
+    const actions = document.createElement("div");
+    actions.className = "json-actions";
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "json-button";
+    toggle.textContent = "Expand";
+    toggle.addEventListener("click", () => {
+      const expanded = shell.classList.toggle("expanded");
+      toggle.textContent = expanded ? "Collapse" : "Expand";
+    });
+    actions.appendChild(toggle);
+
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "json-button";
+    copy.textContent = "Copy";
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(target.textContent || "");
+        copy.textContent = "Copied";
+        window.setTimeout(() => {
+          copy.textContent = "Copy";
+        }, 1200);
+      } catch (_error) {
+        copy.textContent = "Unavailable";
+        window.setTimeout(() => {
+          copy.textContent = "Copy";
+        }, 1200);
+      }
+    });
+    actions.appendChild(copy);
+
+    toolbar.appendChild(actions);
+
+    const parent = target.parentElement;
+    parent.insertBefore(shell, target);
+    shell.appendChild(toolbar);
+    shell.appendChild(target);
+    return shell;
+  }
+
   function renderJson(id, value) {
     const target = document.getElementById(id);
     if (target) {
+      const shell = ensureJsonShell(target);
       target.textContent = JSON.stringify(value, null, 2);
+      if (shell) {
+        const compact = (target.textContent || "").split("\n").length <= 14;
+        shell.classList.toggle("expanded", compact);
+        const toggle = shell.querySelector(".json-button");
+        if (toggle) {
+          toggle.textContent = compact ? "Collapse" : "Expand";
+        }
+      }
     }
   }
 
@@ -276,6 +480,305 @@
     return button;
   }
 
+  function formatCompactNumber(value) {
+    if (value == null || Number.isNaN(Number(value))) {
+      return "-";
+    }
+    return new Intl.NumberFormat("en-US", {
+      notation: "compact",
+      maximumFractionDigits: 1
+    }).format(Number(value));
+  }
+
+  function formatBytes(value) {
+    const numeric = Number(value || 0);
+    if (!numeric) {
+      return "0 B";
+    }
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let amount = numeric;
+    let unitIndex = 0;
+    while (amount >= 1024 && unitIndex < units.length - 1) {
+      amount /= 1024;
+      unitIndex += 1;
+    }
+    return `${amount.toFixed(amount >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  }
+
+  function sparklineSvg(values) {
+    const safeValues = values.length ? values : [0, 0, 0, 0];
+    const max = Math.max(...safeValues, 1);
+    const step = safeValues.length === 1 ? 100 : 100 / (safeValues.length - 1);
+    const points = safeValues
+      .map((value, index) => {
+        const x = Math.round(index * step);
+        const y = Math.round(48 - (value / max) * 40);
+        return `${x},${y}`;
+      })
+      .join(" ");
+    const fillPoints = `0,52 ${points} 100,52`;
+    return `
+      <svg class="sparkline" viewBox="0 0 100 52" preserveAspectRatio="none" aria-hidden="true">
+        <polygon class="sparkline-fill" points="${fillPoints}"></polygon>
+        <polyline points="${points}"></polyline>
+      </svg>
+    `;
+  }
+
+  function renderAnalyticsCards(containerId, cards) {
+    const target = document.getElementById(containerId);
+    if (!target) return;
+    target.replaceChildren();
+    cards.forEach((card) => {
+      const node = document.createElement("article");
+      node.className = "analytic-card";
+      node.innerHTML = `
+        <div class="analytic-card-head">
+          <span>${card.label}</span>
+          <span>${card.meta || ""}</span>
+        </div>
+        <strong>${card.value}</strong>
+        ${sparklineSvg(card.series || [])}
+        <div class="analytic-foot">${card.foot || ""}</div>
+      `;
+      target.appendChild(node);
+    });
+  }
+
+  function renderBarList(containerId, items) {
+    const target = document.getElementById(containerId);
+    if (!target) return;
+    target.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No chart data";
+      target.appendChild(empty);
+      return;
+    }
+    const bars = document.createElement("div");
+    bars.className = "bars";
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "bar-row";
+      row.innerHTML = `
+        <div class="bar-row-head">
+          <span>${item.label}</span>
+          <span>${item.valueLabel}</span>
+        </div>
+        <div class="bar-track">
+          <span class="bar-fill${item.warn ? " warn" : ""}" style="width:${item.ratio}%"></span>
+        </div>
+      `;
+      bars.appendChild(row);
+    });
+    target.appendChild(bars);
+  }
+
+  function renderActivityList(containerId, items) {
+    const target = document.getElementById(containerId);
+    if (!target) return;
+    target.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No recent activity";
+      target.appendChild(empty);
+      return;
+    }
+    const list = document.createElement("div");
+    list.className = "activity-list";
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "activity-item";
+      row.innerHTML = `
+        <span class="activity-dot${item.warn ? " warn" : ""}"></span>
+        <div class="activity-card">
+          <div class="activity-head">
+            <span>${item.title}</span>
+            <span>${item.when}</span>
+          </div>
+          <div>${item.body}</div>
+          <div class="activity-meta">${item.meta}</div>
+        </div>
+      `;
+      list.appendChild(row);
+    });
+    target.appendChild(list);
+  }
+
+  function renderDataCards(containerId, items) {
+    const target = document.getElementById(containerId);
+    if (!target) return;
+    target.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No card data";
+      target.appendChild(empty);
+      return;
+    }
+    const list = document.createElement("div");
+    list.className = "card-list";
+    items.forEach((item) => {
+      const card = document.createElement("article");
+      card.className = "data-card";
+      const chips = (item.chips || []).map((chip) => `<span class="mini-chip">${chip}</span>`).join("");
+      card.innerHTML = `
+        <div class="data-card-head">
+          <div class="data-card-title">${item.title}</div>
+          <div class="data-card-meta">${item.meta || ""}</div>
+        </div>
+        <div class="data-card-body">${item.body || ""}</div>
+        ${chips ? `<div class="chip-row">${chips}</div>` : ""}
+      `;
+      list.appendChild(card);
+    });
+    target.appendChild(list);
+  }
+
+  function renderRoleMatrix(containerId, featureRoles) {
+    const target = document.getElementById(containerId);
+    if (!target) return;
+    target.replaceChildren();
+    const features = Object.keys(featureRoles || {});
+    if (!features.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No role matrix";
+      target.appendChild(empty);
+      return;
+    }
+    const roles = Array.from(
+      new Set(features.flatMap((feature) => featureRoles[feature] || []))
+    ).sort();
+    const matrix = document.createElement("div");
+    matrix.className = "matrix";
+    const grid = document.createElement("div");
+    grid.className = "matrix-grid";
+    grid.style.gridTemplateColumns = `minmax(180px, 2fr) repeat(${roles.length}, minmax(110px, 1fr))`;
+
+    const corner = document.createElement("div");
+    corner.className = "matrix-cell matrix-head";
+    corner.textContent = "Feature";
+    grid.appendChild(corner);
+    roles.forEach((role) => {
+      const head = document.createElement("div");
+      head.className = "matrix-cell matrix-head";
+      head.textContent = role;
+      grid.appendChild(head);
+    });
+
+    features.forEach((feature) => {
+      const label = document.createElement("div");
+      label.className = "matrix-cell matrix-row-head";
+      label.textContent = feature;
+      grid.appendChild(label);
+      roles.forEach((role) => {
+        const cell = document.createElement("div");
+        const allowed = (featureRoles[feature] || []).includes(role);
+        cell.className = `matrix-cell ${allowed ? "matrix-allow" : "matrix-deny"}`;
+        cell.textContent = allowed ? "ALLOW" : "DENY";
+        grid.appendChild(cell);
+      });
+    });
+
+    matrix.appendChild(grid);
+    target.appendChild(matrix);
+  }
+
+  function renderLineChart(containerId, values, options) {
+    const target = document.getElementById(containerId);
+    if (!target) return;
+    target.replaceChildren();
+    if (!values.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No chart data";
+      target.appendChild(empty);
+      return;
+    }
+    const width = 100;
+    const height = 180;
+    const max = Math.max(...values, 1);
+    const min = Math.min(...values, 0);
+    const range = Math.max(max - min, 1);
+    const step = values.length === 1 ? width : width / (values.length - 1);
+    const points = values.map((value, index) => {
+      const x = Math.round(index * step * 100) / 100;
+      const y = Math.round((height - 16 - ((value - min) / range) * (height - 36)) * 100) / 100;
+      return { x, y, value };
+    });
+    const polyline = points.map((point) => `${point.x},${point.y}`).join(" ");
+    const area = `0,${height} ${polyline} ${width},${height}`;
+
+    const card = document.createElement("div");
+    card.className = "chart-card";
+    const title = options?.title || "Trend";
+    const subtitle = options?.subtitle || "";
+    const latest = values[values.length - 1];
+    card.innerHTML = `
+      <div class="chart-shell">
+        <div class="panel-header">
+          <div>
+            <h2>${title}</h2>
+            <p>${subtitle}</p>
+          </div>
+        </div>
+        <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
+          <g class="chart-grid">
+            <line x1="0" y1="${height}" x2="${width}" y2="${height}"></line>
+            <line x1="0" y1="${height * 0.66}" x2="${width}" y2="${height * 0.66}"></line>
+            <line x1="0" y1="${height * 0.33}" x2="${width}" y2="${height * 0.33}"></line>
+          </g>
+          <polygon class="chart-area" points="${area}"></polygon>
+          <polyline class="chart-line" points="${polyline}"></polyline>
+          ${points.map((point) => `<circle class="chart-dot" cx="${point.x}" cy="${point.y}" r="2.4"></circle>`).join("")}
+        </svg>
+        <div class="chart-caption">
+          <span>${options?.leftLabel || "Start"}</span>
+          <span>${options?.valueFormatter ? options.valueFormatter(latest) : latest}</span>
+          <span>${options?.rightLabel || "Latest"}</span>
+        </div>
+      </div>
+    `;
+    target.appendChild(card);
+  }
+
+  function renderTimeline(containerId, items) {
+    const target = document.getElementById(containerId);
+    if (!target) return;
+    target.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No timeline data";
+      target.appendChild(empty);
+      return;
+    }
+    const timeline = document.createElement("div");
+    timeline.className = "timeline";
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "timeline-item";
+      const chips = (item.chips || []).map((chip) => `<span class="mini-chip">${chip}</span>`).join("");
+      row.innerHTML = `
+        <span class="timeline-node${item.warn ? " warn" : ""}"></span>
+        <div class="timeline-content">
+          <div class="timeline-head">
+            <span>${item.title}</span>
+            <span>${item.when || ""}</span>
+          </div>
+          <div>${item.body || ""}</div>
+          <div class="timeline-meta">${item.meta || ""}</div>
+          ${chips ? `<div class="chip-row">${chips}</div>` : ""}
+        </div>
+      `;
+      timeline.appendChild(row);
+    });
+    target.appendChild(timeline);
+  }
+
   function renderTable(containerId, columns, rows) {
     const target = document.getElementById(containerId);
     if (!target) return;
@@ -288,37 +791,96 @@
       return;
     }
 
+    const normalizedRows = rows.map((row) => ({
+      cells: row,
+      text: row.map((cell) =>
+        cell instanceof window.Node ? (cell.textContent || "").trim() : String(cell == null ? "" : cell)
+      )
+    }));
+    let sortIndex = -1;
+    let sortDir = 1;
+    let filterTerm = "";
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "table-toolbar";
+    const count = document.createElement("div");
+    count.className = "table-count";
+    const filter = document.createElement("input");
+    filter.type = "search";
+    filter.placeholder = "Filter rows";
+    toolbar.appendChild(count);
+    toolbar.appendChild(filter);
+
     const wrapper = document.createElement("div");
     wrapper.className = "table-wrap";
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const headerRow = document.createElement("tr");
-    columns.forEach((column) => {
+    columns.forEach((column, columnIndex) => {
       const th = document.createElement("th");
       th.textContent = column;
+      th.classList.add("sortable");
+      th.addEventListener("click", () => {
+        if (sortIndex === columnIndex) {
+          sortDir *= -1;
+        } else {
+          sortIndex = columnIndex;
+          sortDir = 1;
+        }
+        renderRows();
+      });
       headerRow.appendChild(th);
     });
     thead.appendChild(headerRow);
 
     const tbody = document.createElement("tbody");
-    rows.forEach((row) => {
-      const tr = document.createElement("tr");
-      row.forEach((cellValue) => {
-        const td = document.createElement("td");
-        if (cellValue instanceof window.Node) {
-          td.appendChild(cellValue);
-        } else {
-          td.textContent = cellValue == null ? "" : String(cellValue);
+
+    function renderRows() {
+      tbody.replaceChildren();
+      headerRow.querySelectorAll("th").forEach((th, index) => {
+        th.classList.remove("asc", "desc");
+        if (index === sortIndex) {
+          th.classList.add(sortDir > 0 ? "asc" : "desc");
         }
-        tr.appendChild(td);
       });
-      tbody.appendChild(tr);
+
+      let visibleRows = normalizedRows.filter((row) =>
+        !filterTerm || row.text.some((value) => value.toLowerCase().includes(filterTerm))
+      );
+      if (sortIndex >= 0) {
+        visibleRows = [...visibleRows].sort((left, right) => {
+          const a = left.text[sortIndex] || "";
+          const b = right.text[sortIndex] || "";
+          return a.localeCompare(b, undefined, { numeric: true }) * sortDir;
+        });
+      }
+      count.textContent = `${visibleRows.length} rows`;
+      visibleRows.forEach((row) => {
+        const tr = document.createElement("tr");
+        row.cells.forEach((cellValue) => {
+          const td = document.createElement("td");
+          if (cellValue instanceof window.Node) {
+            td.appendChild(cellValue);
+          } else {
+            td.textContent = cellValue == null ? "" : String(cellValue);
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    filter.addEventListener("input", () => {
+      filterTerm = filter.value.trim().toLowerCase();
+      renderRows();
     });
 
     table.appendChild(thead);
     table.appendChild(tbody);
     wrapper.appendChild(table);
+    target.appendChild(toolbar);
     target.appendChild(wrapper);
+    renderRows();
   }
 
   function populateSelect(id, items, selectedValue) {
@@ -345,6 +907,66 @@
   }
 
   function initOverview() {
+    let latestStats = null;
+    let latestHealth = null;
+
+    function renderOverviewCharts() {
+      if (!latestStats || !latestHealth) {
+        return;
+      }
+      const provider = latestHealth.providerTelemetry || latestStats.providerTelemetry;
+      renderAnalyticsCards("overview-analytics", [
+        {
+          label: "Index Size",
+          meta: "Storage",
+          value: formatBytes(latestStats.indexSizeBytes),
+          series: [latestStats.docs, latestStats.chunks, latestStats.snapshotCount, latestStats.indexSizeBytes / 1024],
+          foot: `${latestStats.snapshotCount} snapshots on disk`
+        },
+        {
+          label: "Cache Hit Rate",
+          meta: "Stats Cache",
+          value: `${Number(latestStats.statsCacheHitRatePct || 0).toFixed(1)}%`,
+          series: [
+            latestStats.statsCacheHitCount,
+            latestStats.statsCacheMissCount,
+            latestStats.statsCacheEvictionCount,
+            latestStats.statsCacheExpiredCount
+          ],
+          foot: `${formatCompactNumber(latestStats.statsCacheEntries)} cached entries`
+        },
+        {
+          label: "Provider Requests",
+          meta: "Global",
+          value: formatCompactNumber(provider.requestCount),
+          series: [
+            provider.requestCount,
+            provider.successCount,
+            provider.failureCount,
+            provider.retryCount
+          ],
+          foot: `${provider.failureCount} failures / ${provider.retryCount} retries`
+        },
+        {
+          label: "P95 Latency",
+          meta: "Providers",
+          value: `${Number(provider.p95LatencyMillis || 0).toFixed(1)} ms`,
+          series: provider.endpoints.slice(0, 6).map((endpoint) => endpoint.p95LatencyMillis || 0),
+          foot: `${provider.endpoints.length} endpoints monitored`
+        }
+      ]);
+      const maxLatency = Math.max(...provider.endpoints.map((endpoint) => endpoint.p95LatencyMillis || 0), 1);
+      renderBarList(
+        "overview-endpoints",
+        provider.endpoints.slice(0, 6).map((endpoint) => ({
+          label: endpoint.provider,
+          valueLabel: `${Number(endpoint.p95LatencyMillis || 0).toFixed(1)} ms`,
+          ratio: Math.max(6, Math.round(((endpoint.p95LatencyMillis || 0) / maxLatency) * 100)),
+          warn: Boolean(endpoint.circuitOpen || endpoint.failureCount > 0)
+        }))
+      );
+    }
+
     async function refreshStats() {
       const params = new URLSearchParams();
       if (currentTenant()) {
@@ -354,10 +976,12 @@
         params.set("recentProviderWindowMillis", String(currentWindow()));
       }
       const stats = await request(`/stats?${params.toString()}`, { method: "GET" });
+      latestStats = stats;
       renderJson("output-stats", stats);
       setText("stat-tenant", stats.tenantId || currentTenant() || "all");
       setText("stat-docs", stats.docs);
       setText("stat-chunks", stats.chunks);
+      renderOverviewCharts();
       setNotice("overview-notice", "stats refreshed", false);
     }
 
@@ -368,8 +992,48 @@
         params.set("recentProviderWindowMillis", String(currentWindow()));
       }
       const health = await request(`/provider-health?${params.toString()}`, { method: "GET" });
+      latestHealth = health;
       renderJson("output-health", health);
+      renderOverviewCharts();
       setNotice("overview-notice", "provider health refreshed", false);
+    }
+
+    async function refreshActivity() {
+      const tasks = [];
+      if (hasFeature("search-audit")) {
+        tasks.push(
+          request("/search-audit?limit=4", { method: "GET" }).then((items) =>
+            items.map((entry) => ({
+              timestamp: entry.timestampEpochMillis,
+              title: `Search / ${entry.auditType}`,
+              body: `${entry.query} (${entry.resultCount} hits)`,
+              meta: `${entry.tenantId} · ${entry.role || "anonymous"} · topK ${entry.topK}`,
+              warn: Boolean(entry.providerFallbackApplied),
+              when: new Date(entry.timestampEpochMillis).toISOString()
+            }))
+          ).catch(() => [])
+        );
+      }
+      if (hasFeature("job-history")) {
+        tasks.push(
+          request("/job-history?limit=4", { method: "GET" }).then((items) =>
+            items.map((entry) => ({
+              timestamp: entry.timestampEpochMillis,
+              title: `Job / ${entry.jobType}`,
+              body: `${entry.description}`,
+              meta: `${entry.tenantId || "-"} · ${entry.status}${entry.message ? ` · ${entry.message}` : ""}`,
+              warn: entry.status !== "SUCCESS",
+              when: new Date(entry.timestampEpochMillis).toISOString()
+            }))
+          ).catch(() => [])
+        );
+      }
+      const groups = await Promise.all(tasks);
+      const merged = groups
+        .flat()
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 6);
+      renderActivityList("overview-activity", merged);
     }
 
     document.getElementById("btn-stats")?.addEventListener("click", () => run("overview-notice", refreshStats));
@@ -377,10 +1041,88 @@
     run("overview-notice", async () => {
       await refreshStats();
       await refreshHealth();
+      await refreshActivity();
     });
   }
 
   function initSearch() {
+    function renderSearchSummary(response) {
+      const telemetry = response.telemetry || {};
+      renderAnalyticsCards("search-analytics", [
+        {
+          label: "Hits",
+          meta: "Results",
+          value: formatCompactNumber(response.hits.length),
+          series: response.hits.map((hit) => Number(hit.score || 0) * 10),
+          foot: `${telemetry.executedQuery || response.query}`
+        },
+        {
+          label: "Providers Used",
+          meta: "Telemetry",
+          value: formatCompactNumber((telemetry.providersUsed || []).length),
+          series: [
+            (telemetry.providersUsed || []).length,
+            telemetry.providerFallbackApplied ? 1 : 0,
+            telemetry.correctiveRetryApplied ? 1 : 0,
+            telemetry.queryRewriteApplied ? 1 : 0
+          ],
+          foot: telemetry.providerFallbackApplied ? "Fallback applied" : "Primary path"
+        },
+        {
+          label: "Top Score",
+          meta: "Ranking",
+          value: response.hits.length ? Number(response.hits[0].score || 0).toFixed(3) : "0.000",
+          series: response.hits.slice(0, 8).map((hit) => Number(hit.score || 0) * 10),
+          foot: `${response.hits.length} hits returned`
+        },
+        {
+          label: "Notes",
+          meta: "Telemetry",
+          value: formatCompactNumber((telemetry.notes || []).length),
+          series: (telemetry.notes || []).map((_, index) => index + 1),
+          foot: telemetry.providerFallbackReason || "No fallback reason"
+        }
+      ]);
+      const providerCounts = (response.providerTelemetry?.endpoints || []).map((endpoint) => ({
+        label: endpoint.provider,
+        valueLabel: `${Number(endpoint.avgLatencyMillis || 0).toFixed(1)} ms`,
+        ratio: Math.max(
+          8,
+          Math.round(
+            ((endpoint.avgLatencyMillis || 0) /
+              Math.max(...response.providerTelemetry.endpoints.map((item) => item.avgLatencyMillis || 0), 1)) *
+              100
+          )
+        ),
+        warn: Boolean(endpoint.failureCount > 0 || endpoint.circuitOpen)
+      }));
+      renderBarList("search-provider-bars", providerCounts);
+      renderDataCards(
+        "search-hit-cards",
+        response.hits.slice(0, 6).map((hit) => ({
+          title: `${hit.docId} / ${hit.chunkId}`,
+          meta: `score ${Number(hit.score || 0).toFixed(3)}`,
+          body: hit.text || "(no preview text)",
+          chips: [
+            hit.contentKind || "text",
+            hit.page != null ? `page ${hit.page}` : "no page",
+            hit.sourceUri || "no source"
+          ]
+        }))
+      );
+      renderLineChart(
+        "search-score-chart",
+        response.hits.slice(0, 12).map((hit) => Number(hit.score || 0)),
+        {
+          title: "Hit Score Curve",
+          subtitle: "Top ranked hit scores in descending order",
+          leftLabel: "Rank 1",
+          rightLabel: `Rank ${Math.min(response.hits.length, 12)}`,
+          valueFormatter: (value) => Number(value || 0).toFixed(3)
+        }
+      );
+    }
+
     function searchPayload() {
       return {
         tenantId: currentTenant(),
@@ -399,6 +1141,7 @@
         body: JSON.stringify(searchPayload())
       });
       renderJson("output-search", response);
+      renderSearchSummary(response);
       setNotice("search-notice", `search completed with ${response.hits.length} hits`, false);
     }
 
@@ -408,6 +1151,38 @@
         body: JSON.stringify(searchPayload())
       });
       renderJson("output-diagnostics", response);
+      renderDataCards(
+        "search-diagnostic-cards",
+        [
+          {
+            title: "Tenant Coverage",
+            meta: "Corpus",
+            body: `tenantDocs=${response.tenantDocs}, lexicalWithAcl=${response.lexicalMatchesWithAcl}, vectorWithAcl=${response.vectorMatchesWithAcl}`,
+            chips: [`lexical ${response.lexicalMatchesWithAcl}`, `vector ${response.vectorMatchesWithAcl}`]
+          },
+          {
+            title: "ACL Delta",
+            meta: "Filter effect",
+            body: `without ACL lexical=${response.lexicalMatchesWithoutAcl}, vector=${response.vectorMatchesWithoutAcl}`,
+            chips: [
+              `lexical drop ${response.lexicalMatchesWithoutAcl - response.lexicalMatchesWithAcl}`,
+              `vector drop ${response.vectorMatchesWithoutAcl - response.vectorMatchesWithAcl}`
+            ]
+          },
+          {
+            title: "Sample Docs",
+            meta: "Diagnostics",
+            body: `lexical=${(response.lexicalSampleDocIdsWithAcl || []).join(", ") || "-"}`,
+            chips: (response.vectorSampleDocIdsWithAcl || []).slice(0, 4)
+          },
+          {
+            title: "Provider Notes",
+            meta: "Telemetry",
+            body: response.telemetry.providerFallbackReason || "No fallback reason",
+            chips: response.telemetry.providersUsed || []
+          }
+        ]
+      );
       setNotice("search-notice", "diagnostics completed", false);
     }
 
@@ -459,6 +1234,112 @@
   }
 
   function initDocuments() {
+    function renderDocumentTimeline(detail) {
+      renderTimeline(
+        "document-timeline",
+        (detail.chunks || []).map((chunk) => ({
+          title: `${chunk.chunkId}${chunk.page != null ? ` / page ${chunk.page}` : ""}`,
+          when: chunk.offsetStart != null && chunk.offsetEnd != null
+            ? `${chunk.offsetStart}-${chunk.offsetEnd}`
+            : "offset n/a",
+          body: chunk.text || "(no stored text preview)",
+          meta: `${chunk.contentKind || "text"} · ${chunk.sourceUri || "no source"}`,
+          warn: chunk.contentKind && chunk.contentKind.toLowerCase().includes("binary"),
+          chips: [
+            chunk.contentKind || "text",
+            chunk.page != null ? `page ${chunk.page}` : "no page"
+          ]
+        }))
+      );
+    }
+
+    function renderDocumentSpotlight(detail) {
+      renderDataCards("document-detail-cards", [
+        {
+          title: detail.docId,
+          meta: detail.lastUpdatedIso || "updated n/a",
+          body: `${detail.chunkCount} chunks · ${detail.sourceUris[0] || "no source"}`,
+          chips: detail.acl.slice(0, 6)
+        },
+        {
+          title: "Metadata",
+          meta: `${Object.keys(detail.metadata || {}).length} fields`,
+          body: Object.entries(detail.metadata || {})
+            .slice(0, 6)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(", ") || "No metadata",
+          chips: Object.keys(detail.metadata || {}).slice(0, 6)
+        },
+        {
+          title: "Sources",
+          meta: `${detail.sourceUris.length} URIs`,
+          body: detail.sourceUris.join(", ") || "No source URIs",
+          chips: detail.sourceUris.slice(0, 4)
+        },
+        {
+          title: "Chunk Layout",
+          meta: "Pages and content",
+          body: (detail.chunks || [])
+            .slice(0, 4)
+            .map((chunk) => `${chunk.chunkId}${chunk.page != null ? `@${chunk.page}` : ""}`)
+            .join(", "),
+          chips: Array.from(new Set((detail.chunks || []).map((chunk) => chunk.contentKind))).slice(0, 6)
+        }
+      ]);
+    }
+
+    function renderDocumentSummary(response) {
+      const items = response.items || [];
+      const totalChunks = items.reduce((sum, item) => sum + Number(item.chunkCount || 0), 0);
+      const sourceCount = new Set(items.flatMap((item) => item.sourceUris || [])).size;
+      const contentCounts = items.reduce((acc, item) => {
+        (item.contentKinds || []).forEach((kind) => {
+          acc[kind] = (acc[kind] || 0) + 1;
+        });
+        return acc;
+      }, {});
+      renderAnalyticsCards("document-analytics", [
+        {
+          label: "Documents",
+          meta: "Loaded",
+          value: formatCompactNumber(items.length),
+          series: items.slice(0, 8).map((item) => item.chunkCount || 0),
+          foot: `${response.totalCount} total rows`
+        },
+        {
+          label: "Chunks",
+          meta: "Aggregate",
+          value: formatCompactNumber(totalChunks),
+          series: items.slice(0, 8).map((item) => item.chunkCount || 0),
+          foot: "Across current filter"
+        },
+        {
+          label: "Sources",
+          meta: "Distinct",
+          value: formatCompactNumber(sourceCount),
+          series: items.slice(0, 8).map((item) => (item.sourceUris || []).length),
+          foot: "Distinct source URIs"
+        },
+        {
+          label: "Content Kinds",
+          meta: "Surface",
+          value: formatCompactNumber(Object.keys(contentCounts).length),
+          series: Object.values(contentCounts).slice(0, 8),
+          foot: "Kinds across loaded docs"
+        }
+      ]);
+      const maxCount = Math.max(...Object.values(contentCounts), 1);
+      renderBarList(
+        "document-bars",
+        Object.entries(contentCounts).map(([kind, count]) => ({
+          label: kind,
+          valueLabel: `${count} docs`,
+          ratio: Math.max(8, Math.round((count / maxCount) * 100)),
+          warn: kind.toLowerCase().includes("binary")
+        }))
+      );
+    }
+
     async function refreshDocuments() {
       const params = new URLSearchParams();
       const tenantId = currentTenant();
@@ -481,6 +1362,7 @@
           createButton("Open", () => run("documents-notice", () => loadDetail(item.tenantId, item.docId)), "secondary")
         ])
       );
+      renderDocumentSummary(response);
       setNotice("documents-notice", `loaded ${response.totalCount} documents`, false);
     }
 
@@ -504,6 +1386,8 @@
         detail.chunks[0]?.chunkId || ""
       );
       renderJson("output-document-detail", detail);
+      renderDocumentTimeline(detail);
+      renderDocumentSpotlight(detail);
       setNotice("documents-notice", `loaded ${detail.docId}`, false);
     }
 
@@ -577,6 +1461,8 @@
       renderJson("output-document-action", response);
       renderJson("output-document-detail", {});
       renderJson("output-source-preview", {});
+      renderTimeline("document-timeline", []);
+      renderDataCards("document-detail-cards", []);
       await refreshDocuments();
       setNotice("documents-notice", "document deleted", false);
     }
@@ -590,6 +1476,90 @@
   }
 
   function initTenants() {
+    function renderSnapshotTimeline(snapshots) {
+      renderTimeline(
+        "snapshot-timeline",
+        (snapshots || []).map((snapshot) => ({
+          title: snapshot.tag,
+          when: snapshot.updatedAtIso,
+          body: `snapshot tag ${snapshot.tag}`,
+          meta: `updated ${snapshot.updatedAtIso}`,
+          warn: false,
+          chips: ["restore ready", "snapshot"]
+        }))
+      );
+    }
+
+    function renderTenantSpotlight(detail) {
+      renderDataCards("tenant-detail-cards", [
+        {
+          title: detail.tenantId,
+          meta: detail.lastCommitIso || "commit n/a",
+          body: `${detail.docs} docs · ${detail.chunks} chunks`,
+          chips: [`docs ${detail.docs}`, `chunks ${detail.chunks}`]
+        },
+        {
+          title: "Recovery Points",
+          meta: `${(detail.snapshots || []).length} snapshots`,
+          body: (detail.snapshots || []).map((snapshot) => snapshot.tag).join(", ") || "No snapshots",
+          chips: (detail.snapshots || []).slice(0, 5).map((snapshot) => snapshot.tag)
+        },
+        {
+          title: "Top Documents",
+          meta: `${(detail.documents || []).length} loaded`,
+          body: (detail.documents || []).slice(0, 4).map((doc) => `${doc.docId} (${doc.chunkCount})`).join(", ") || "No documents",
+          chips: (detail.documents || []).slice(0, 4).map((doc) => doc.docId)
+        }
+      ]);
+    }
+
+    function renderTenantSummary(response) {
+      const items = response.items || [];
+      const totalDocs = items.reduce((sum, item) => sum + Number(item.docs || 0), 0);
+      const totalChunks = items.reduce((sum, item) => sum + Number(item.chunks || 0), 0);
+      renderAnalyticsCards("tenant-analytics", [
+        {
+          label: "Tenants",
+          meta: "Loaded",
+          value: formatCompactNumber(items.length),
+          series: items.slice(0, 8).map((item) => item.docs || 0),
+          foot: "Current index tenants"
+        },
+        {
+          label: "Docs",
+          meta: "Aggregate",
+          value: formatCompactNumber(totalDocs),
+          series: items.slice(0, 8).map((item) => item.docs || 0),
+          foot: "Across visible tenants"
+        },
+        {
+          label: "Chunks",
+          meta: "Aggregate",
+          value: formatCompactNumber(totalChunks),
+          series: items.slice(0, 8).map((item) => item.chunks || 0),
+          foot: "Chunk footprint"
+        },
+        {
+          label: "Snapshots",
+          meta: "Recovery",
+          value: formatCompactNumber((response.snapshots || []).length),
+          series: (response.snapshots || []).slice(0, 8).map((_, index) => index + 1),
+          foot: "Available snapshot tags"
+        }
+      ]);
+      const maxChunks = Math.max(...items.map((item) => item.chunks || 0), 1);
+      renderBarList(
+        "tenant-bars",
+        items.slice(0, 8).map((item) => ({
+          label: item.tenantId,
+          valueLabel: `${item.chunks} chunks`,
+          ratio: Math.max(8, Math.round(((item.chunks || 0) / maxChunks) * 100)),
+          warn: (item.docs || 0) === 0
+        }))
+      );
+      renderSnapshotTimeline(response.snapshots || []);
+    }
+
     async function refreshTenants() {
       const response = await request("/tenants", { method: "GET" });
       renderJson("output-tenants", response);
@@ -616,6 +1586,7 @@
           }, "secondary")
         ])
       );
+      renderTenantSummary(response);
       setNotice("tenants-notice", `loaded ${response.items.length} tenants`, false);
     }
 
@@ -628,6 +1599,7 @@
         readContext();
       }
       renderJson("output-tenant-detail", response);
+      renderTenantSpotlight(response);
       setNotice("tenants-notice", `loaded ${tenantId}`, false);
     }
 
@@ -713,6 +1685,60 @@
       ]);
       renderJson("output-provider-health", health);
       renderJson("output-provider-history", history);
+      renderAnalyticsCards("provider-analytics", [
+        {
+          label: "Global P95",
+          meta: "Latency",
+          value: `${Number(health.providerTelemetry.p95LatencyMillis || 0).toFixed(1)} ms`,
+          series: history.history.slice(0, 8).reverse().map((entry) => entry.telemetry.p95LatencyMillis || 0),
+          foot: `${health.providerTelemetry.endpoints.length} active endpoints`
+        },
+        {
+          label: "Failures",
+          meta: "History",
+          value: formatCompactNumber(health.providerTelemetry.failureCount),
+          series: history.history.slice(0, 8).reverse().map((entry) => entry.telemetry.failureCount || 0),
+          foot: `${history.fallbackEvents.length} fallback events tracked`
+        },
+        {
+          label: "Retries",
+          meta: "Health",
+          value: formatCompactNumber(health.providerTelemetry.retryCount),
+          series: history.history.slice(0, 8).reverse().map((entry) => entry.telemetry.retryCount || 0),
+          foot: `${health.providerTelemetry.circuitOpenCount} circuit-open events`
+        },
+        {
+          label: "Requests",
+          meta: "Throughput",
+          value: formatCompactNumber(health.providerTelemetry.requestCount),
+          series: history.history.slice(0, 8).reverse().map((entry) => entry.telemetry.requestCount || 0),
+          foot: `${history.history.length} samples in memory`
+        }
+      ]);
+      const maxEndpointLatency = Math.max(
+        ...health.providerTelemetry.endpoints.map((endpoint) => endpoint.avgLatencyMillis || 0),
+        1
+      );
+      renderBarList(
+        "provider-endpoint-bars",
+        health.providerTelemetry.endpoints.slice(0, 8).map((endpoint) => ({
+          label: endpoint.provider,
+          valueLabel: `${Number(endpoint.avgLatencyMillis || 0).toFixed(1)} ms avg`,
+          ratio: Math.max(6, Math.round(((endpoint.avgLatencyMillis || 0) / maxEndpointLatency) * 100)),
+          warn: Boolean(endpoint.circuitOpen || endpoint.failureCount > 0)
+        }))
+      );
+      renderLineChart(
+        "provider-latency-chart",
+        history.history.slice(0, 12).reverse().map((entry) => Number(entry.telemetry.p95LatencyMillis || 0)),
+        {
+          title: "P95 Latency Trend",
+          subtitle: "Recent provider history samples",
+          leftLabel: "Oldest",
+          rightLabel: "Latest",
+          valueFormatter: (value) => `${Number(value || 0).toFixed(1)} ms`
+        }
+      );
       renderTable(
         "provider-history-table",
         ["Timestamp", "Source", "Endpoints", "Failures"],
@@ -746,6 +1772,57 @@
       const limit = document.getElementById("audit-limit")?.value || "100";
       const response = await request(`/search-audit?limit=${encodeURIComponent(limit)}`, { method: "GET" });
       renderJson("output-search-audit", response);
+      const fallbackCount = response.filter((entry) => entry.providerFallbackApplied).length;
+      const avgHits = response.length
+        ? response.reduce((sum, entry) => sum + Number(entry.resultCount || 0), 0) / response.length
+        : 0;
+      const avgTopK = response.length
+        ? response.reduce((sum, entry) => sum + Number(entry.topK || 0), 0) / response.length
+        : 0;
+      renderAnalyticsCards("audit-analytics", [
+        {
+          label: "Audit Rows",
+          meta: "Loaded",
+          value: formatCompactNumber(response.length),
+          series: response.slice(0, 8).reverse().map((entry) => entry.resultCount || 0),
+          foot: "Recent search executions"
+        },
+        {
+          label: "Fallback Events",
+          meta: "Provider",
+          value: formatCompactNumber(fallbackCount),
+          series: response.slice(0, 8).reverse().map((entry) => (entry.providerFallbackApplied ? 1 : 0)),
+          foot: "Provider fallback applied"
+        },
+        {
+          label: "Average Hits",
+          meta: "Results",
+          value: avgHits.toFixed(1),
+          series: response.slice(0, 8).reverse().map((entry) => entry.resultCount || 0),
+          foot: "Per audit row"
+        },
+        {
+          label: "Average Top K",
+          meta: "Query",
+          value: avgTopK.toFixed(1),
+          series: response.slice(0, 8).reverse().map((entry) => entry.topK || 0),
+          foot: "Requested retrieval depth"
+        }
+      ]);
+      const typeCounts = response.reduce((acc, entry) => {
+        acc[entry.auditType] = (acc[entry.auditType] || 0) + 1;
+        return acc;
+      }, {});
+      const maxTypeCount = Math.max(...Object.values(typeCounts), 1);
+      renderBarList(
+        "audit-bars",
+        Object.entries(typeCounts).map(([type, count]) => ({
+          label: type,
+          valueLabel: `${count} rows`,
+          ratio: Math.max(8, Math.round((count / maxTypeCount) * 100)),
+          warn: type.includes("diagnose")
+        }))
+      );
       renderTable(
         "audit-table",
         ["When", "Type", "Tenant", "Query", "Hits", "Role", "Fallback"],
@@ -771,6 +1848,55 @@
       const limit = document.getElementById("job-limit")?.value || "100";
       const response = await request(`/job-history?limit=${encodeURIComponent(limit)}`, { method: "GET" });
       renderJson("output-job-history", response);
+      const statusCounts = response.reduce((acc, entry) => {
+        acc[entry.status] = (acc[entry.status] || 0) + 1;
+        return acc;
+      }, {});
+      const retryableCount = response.filter((entry) => entry.retrySupported).length;
+      renderAnalyticsCards("job-analytics", [
+        {
+          label: "Total Jobs",
+          meta: "Loaded",
+          value: formatCompactNumber(response.length),
+          series: response.slice(0, 8).reverse().map((_, index) => index + 1),
+          foot: "Recent execution records"
+        },
+        {
+          label: "Success Jobs",
+          meta: "Status",
+          value: formatCompactNumber(statusCounts.SUCCESS || 0),
+          series: response.slice(0, 8).reverse().map((entry) => (entry.status === "SUCCESS" ? 1 : 0)),
+          foot: "Completed successfully"
+        },
+        {
+          label: "Failed Jobs",
+          meta: "Status",
+          value: formatCompactNumber(statusCounts.FAILED || 0),
+          series: response.slice(0, 8).reverse().map((entry) => (entry.status === "FAILED" ? 1 : 0)),
+          foot: "Require investigation"
+        },
+        {
+          label: "Retryable",
+          meta: "Ops",
+          value: formatCompactNumber(retryableCount),
+          series: response.slice(0, 8).reverse().map((entry) => (entry.retrySupported ? 1 : 0)),
+          foot: "Can be rerun from UI"
+        }
+      ]);
+      const typeCounts = response.reduce((acc, entry) => {
+        acc[entry.jobType] = (acc[entry.jobType] || 0) + 1;
+        return acc;
+      }, {});
+      const maxJobTypeCount = Math.max(...Object.values(typeCounts), 1);
+      renderBarList(
+        "job-bars",
+        Object.entries(typeCounts).map(([type, count]) => ({
+          label: type,
+          valueLabel: `${count} jobs`,
+          ratio: Math.max(8, Math.round((count / maxJobTypeCount) * 100)),
+          warn: type.includes("delete") || type.includes("restore")
+        }))
+      );
       renderTable(
         "job-table",
         ["When", "Type", "Tenant", "Status", "Description", "Actions"],
@@ -801,6 +1927,41 @@
     async function refreshAccessSecurity() {
       const response = await request("/access-security", { method: "GET" });
       renderJson("output-access-security", response);
+      const featureRoles = response.featureRoles || {};
+      const roles = Array.from(new Set(Object.values(featureRoles).flat())).sort();
+      const auditEntries = response.recentAccessAudits || [];
+      const grantedCount = auditEntries.filter((entry) => entry.granted).length;
+      renderAnalyticsCards("access-analytics", [
+        {
+          label: "Features",
+          meta: "Policy",
+          value: formatCompactNumber(Object.keys(featureRoles).length),
+          series: Object.values(featureRoles).slice(0, 8).map((list) => list.length),
+          foot: "Protected feature entries"
+        },
+        {
+          label: "Roles",
+          meta: "Policy",
+          value: formatCompactNumber(roles.length),
+          series: roles.map((_, index) => index + 1),
+          foot: "Distinct roles in policy"
+        },
+        {
+          label: "Granted Access",
+          meta: "Audit",
+          value: formatCompactNumber(grantedCount),
+          series: auditEntries.slice(0, 8).reverse().map((entry) => (entry.granted ? 1 : 0)),
+          foot: `${auditEntries.length - grantedCount} denied`
+        },
+        {
+          label: "Current Role",
+          meta: "Session",
+          value: response.currentRole || "ANONYMOUS",
+          series: roles.map((role) => (role === response.currentRole ? 1 : 0)),
+          foot: response.securityEnabled ? "Security enabled" : "Security disabled"
+        }
+      ]);
+      renderRoleMatrix("role-matrix", featureRoles);
       renderTable(
         "access-feature-table",
         ["Feature", "Roles"],
@@ -886,6 +2047,7 @@
     setBadges();
     setupNavigation();
     bindContext();
+    decorateContentShell();
 
     switch (document.body.dataset.page) {
       case "search":

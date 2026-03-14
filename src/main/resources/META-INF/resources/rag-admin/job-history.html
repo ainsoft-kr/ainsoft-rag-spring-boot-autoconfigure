@@ -7,81 +7,57 @@
     <link rel="stylesheet" href="assets/app.css" />
   </head>
   <body data-page="job-history">
-    <main>
-      <section class="hero">
-        <div class="hero-top">
-          <div>
-            <span class="eyebrow">Job History</span>
-            <h1>Job History</h1>
-            <p class="lead">
-              ingest/upload/운영 작업 이력과 상태, 재시도 가능한 작업을 조회합니다.
-            </p>
-          </div>
-          <div class="badge-row">
-            <span class="badge" id="badge-base"></span>
-            <span class="badge" id="badge-api"></span>
-            <span class="badge" id="badge-window"></span>
-            <span class="badge" id="badge-role"></span>
-          </div>
-        </div>
-
+    <main class="dashboard-shell">
+      <aside class="sidebar">
+        <section class="brand"><span class="brand-mark">RA</span><div><div class="brand-title">RAG Admin</div><p class="brand-copy">Operational job tape for ingest, restore, rebuild, and retry flows.</p></div></section>
+        <section class="sidebar-panel">
+          <p class="sidebar-kicker">Job Scope</p>
+          <div class="sidebar-metric"><strong id="shell-tenant">tenant-admin</strong><span>Recent tenant</span></div>
+          <div class="sidebar-metric"><strong id="shell-role">ADMIN</strong><span>Operator role</span></div>
+          <div class="sidebar-metric"><strong id="shell-window">60000 ms</strong><span>Provider window</span></div>
+        </section>
         <nav class="nav-menu"></nav>
-      </section>
+      </aside>
 
-      <section class="grid">
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>History Query</h2>
-              <p>최근 job history를 조회하고 실패 작업을 재시도합니다.</p>
-            </div>
-          </div>
-          <div class="stack">
-            <label>
-              Limit
-              <input id="job-limit" type="number" value="100" />
-            </label>
-            <div class="actions">
-              <button id="btn-job-refresh">Refresh Job History</button>
-            </div>
-            <div class="notice" id="job-notice"></div>
-          </div>
-        </article>
+      <section class="content-area">
+        <header class="page-header">
+          <div><p class="eyebrow">Job History</p><h1>Execution Tape</h1><p class="lead">ingest/upload/운영 작업 이력을 시간순으로 보고, 재시도 가능한 작업을 즉시 다시 실행합니다.</p></div>
+          <div class="header-badges"><span class="badge" id="badge-base"></span><span class="badge" id="badge-api"></span><span class="badge" id="badge-window"></span><span class="badge" id="badge-role"></span></div>
+        </header>
 
-        <article class="panel full">
-          <div class="panel-header">
-            <div>
-              <h2>Job Table</h2>
-              <p>job별 상태와 retry 가능 여부를 확인합니다.</p>
-            </div>
-          </div>
-          <div id="job-table"></div>
-        </article>
-
-        <article class="panel full">
-          <div class="panel-header">
-            <div>
-              <h2>Outputs</h2>
-              <p>job history 응답과 retry 응답을 JSON으로 표시합니다.</p>
-            </div>
-          </div>
-          <div class="grid">
+        <section class="grid">
+          <article class="panel">
+            <div class="panel-header"><div><h2>History Query</h2><p>최근 job history를 조회하고 retry 가능한 작업을 추립니다.</p></div></div>
             <div class="stack">
-              <strong>Job History</strong>
-              <pre id="output-job-history">{}</pre>
+              <label>Limit<input id="job-limit" type="number" value="100" /></label>
+              <div class="actions"><button id="btn-job-refresh">Refresh Job History</button></div>
+              <div class="notice" id="job-notice"></div>
             </div>
-            <div class="stack">
-              <strong>Retry Action</strong>
-              <pre id="output-job-action">{}</pre>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header"><div><h2>Job Summary</h2><p>성공/실패/실행 중 상태와 job type 분포를 요약합니다.</p></div></div>
+            <div class="analytic-grid" id="job-analytics"></div>
+            <div id="job-bars"></div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Job Table</h2><p>job별 상태와 retry 가능 여부를 확인합니다.</p></div></div>
+            <div id="job-table"></div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Feeds</h2><p>job history 응답과 retry 응답을 함께 봅니다.</p></div></div>
+            <div class="grid">
+              <div class="stack"><strong>Job History</strong><pre id="output-job-history">{}</pre></div>
+              <div class="stack"><strong>Retry Action</strong><pre id="output-job-action">{}</pre></div>
             </div>
-          </div>
-        </article>
+          </article>
+        </section>
       </section>
     </main>
 
-    <script>
-      window.RAG_ADMIN_CONFIG = __RAG_ADMIN_CONFIG__;
-    </script>
+    <script>window.RAG_ADMIN_CONFIG = __RAG_ADMIN_CONFIG__;</script>
     <script src="assets/app.js"></script>
   </body>
 </html>

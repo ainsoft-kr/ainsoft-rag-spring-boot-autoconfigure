@@ -7,99 +7,99 @@
     <link rel="stylesheet" href="assets/app.css" />
   </head>
   <body data-page="search">
-    <main>
-      <section class="hero">
-        <div class="hero-top">
+    <main class="dashboard-shell">
+      <aside class="sidebar">
+        <section class="brand">
+          <span class="brand-mark">RA</span>
           <div>
-            <span class="eyebrow">Search</span>
-            <h1>RAG Admin Console</h1>
-            <p class="lead">
-              검색과 진단 기능을 분리한 페이지입니다. 실행 결과는 Search Audit과 Provider History에 반영됩니다.
-            </p>
+            <div class="brand-title">RAG Admin</div>
+            <p class="brand-copy">Diagnostic retrieval board with audit-aware search flow.</p>
           </div>
-          <div class="badge-row">
+        </section>
+        <section class="sidebar-panel">
+          <p class="sidebar-kicker">Retrieval Focus</p>
+          <div class="sidebar-metric"><strong id="shell-tenant">tenant-admin</strong><span>Tenant scope</span></div>
+          <div class="sidebar-metric"><strong id="shell-role">ADMIN</strong><span>Access role</span></div>
+          <div class="sidebar-metric"><strong id="shell-window">60000 ms</strong><span>Provider window</span></div>
+        </section>
+        <nav class="nav-menu"></nav>
+      </aside>
+
+      <section class="content-area">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">Search</p>
+            <h1>Finance-Style Search Desk</h1>
+            <p class="lead">검색과 진단을 같은 보드에서 실행하고, 결과는 Search Audit과 Provider History로 연결됩니다.</p>
+          </div>
+          <div class="header-badges">
             <span class="badge" id="badge-base"></span>
             <span class="badge" id="badge-api"></span>
             <span class="badge" id="badge-window"></span>
             <span class="badge" id="badge-role"></span>
           </div>
-        </div>
+        </header>
 
-        <nav class="nav-menu"></nav>
-      </section>
-
-      <section class="grid">
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>Workspace Context</h2>
-              <p>Overview와 동일한 tenant/window를 공유합니다.</p>
-            </div>
-          </div>
-          <div class="dual">
-            <label>
-              Tenant ID
-              <input data-context="tenantId" value="tenant-admin" />
-            </label>
-            <label>
-              Recent Provider Window (ms)
-              <input data-context="recentProviderWindowMillis" type="number" value="60000" />
-            </label>
-          </div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>Search Form</h2>
-              <p>ACL principal 기준 검색과 진단을 실행합니다.</p>
-            </div>
-          </div>
-          <div class="stack">
-            <div class="dual">
-              <label>
-                Principals
-                <input id="search-principals" value="group:admin" />
-              </label>
-              <label>
-                Top K
-                <input id="search-topk" type="number" value="5" />
-              </label>
-            </div>
-            <label>
-              Query
-              <input id="search-query" value="hybrid retrieval" />
-            </label>
-            <label>
-              Metadata Filter (`key=value`)
-              <textarea id="search-filter" placeholder="surface=admin"></textarea>
-            </label>
-            <div class="actions">
-              <button id="btn-search">Run Search</button>
-              <button class="secondary" id="btn-diagnose">Run Diagnostics</button>
-            </div>
-            <div class="notice" id="search-notice"></div>
-          </div>
-        </article>
-
-        <article class="panel full">
-          <div class="panel-header">
-            <div>
-              <h2>Outputs</h2>
-              <p>검색 결과와 진단 결과를 분리해 보여 줍니다.</p>
-            </div>
-          </div>
-          <div class="grid">
+        <section class="grid">
+          <article class="panel">
+            <div class="panel-header"><div><h2>Search Controls</h2><p>ACL principal 기준 검색과 진단을 실행합니다.</p></div></div>
             <div class="stack">
-              <strong>Search</strong>
-              <pre id="output-search">{}</pre>
+              <div class="dual">
+                <label>Tenant ID<input data-context="tenantId" value="tenant-admin" /></label>
+                <label>Recent Provider Window (ms)<input data-context="recentProviderWindowMillis" type="number" value="60000" /></label>
+              </div>
+              <div class="dual">
+                <label>Principals<input id="search-principals" value="group:admin" /></label>
+                <label>Top K<input id="search-topk" type="number" value="5" /></label>
+              </div>
+              <label>Query<input id="search-query" value="hybrid retrieval" /></label>
+              <label>Metadata Filter (`key=value`)<textarea id="search-filter" placeholder="surface=admin"></textarea></label>
+              <div class="actions">
+                <button id="btn-search">Run Search</button>
+                <button class="secondary" id="btn-diagnose">Run Diagnostics</button>
+              </div>
+              <div class="notice" id="search-notice"></div>
             </div>
-            <div class="stack">
-              <strong>Diagnostics</strong>
-              <pre id="output-diagnostics">{}</pre>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header"><div><h2>Desk Notes</h2><p>여기서 실행한 검색은 Search Audit 페이지에서 역할, 쿼리, 결과 수 기준으로 다시 조회할 수 있습니다.</p></div></div>
+            <div class="feature-grid">
+              <div class="feature-card"><h3>Query</h3><p>질의와 metadata filter를 함께 보내 hybrid retrieval 조건을 실험합니다.</p></div>
+              <div class="feature-card"><h3>Diagnostics</h3><p>ACL 적용 전후 lexical/vector 매치를 비교합니다.</p></div>
+              <div class="feature-card"><h3>Providers</h3><p>fallback 이력과 최근 telemetry 창을 함께 추적합니다.</p></div>
             </div>
-          </div>
-        </article>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Search Summary</h2><p>최근 검색 실행의 hit, fallback, provider 사용 현황을 요약합니다.</p></div></div>
+            <div class="analytic-grid" id="search-analytics"></div>
+            <div id="search-provider-bars"></div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Hit Cards</h2><p>상위 검색 hit를 카드형으로 훑어봅니다.</p></div></div>
+            <div id="search-hit-cards"></div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Score Trend</h2><p>검색 hit score를 큰 차트로 시각화합니다.</p></div></div>
+            <div id="search-score-chart"></div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Diagnostics Insight</h2><p>진단 응답을 카드형 인사이트로 재구성합니다.</p></div></div>
+            <div id="search-diagnostic-cards"></div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Search Streams</h2><p>검색 응답과 진단 응답을 나란히 표시합니다.</p></div></div>
+            <div class="grid">
+              <div class="stack"><strong>Search</strong><pre id="output-search">{}</pre></div>
+              <div class="stack"><strong>Diagnostics</strong><pre id="output-diagnostics">{}</pre></div>
+            </div>
+          </article>
+        </section>
       </section>
     </main>
 

@@ -7,151 +7,98 @@
     <link rel="stylesheet" href="assets/app.css" />
   </head>
   <body data-page="documents">
-    <main>
-      <section class="hero">
-        <div class="hero-top">
-          <div>
-            <span class="eyebrow">Document Browser</span>
-            <h1>Documents</h1>
-            <p class="lead">
-              문서 목록, 상세, metadata/ACL, 삭제, 재색인, source preview를 한 페이지에서 다룹니다.
-            </p>
-          </div>
-          <div class="badge-row">
-            <span class="badge" id="badge-base"></span>
-            <span class="badge" id="badge-api"></span>
-            <span class="badge" id="badge-window"></span>
-            <span class="badge" id="badge-role"></span>
-          </div>
-        </div>
-
+    <main class="dashboard-shell">
+      <aside class="sidebar">
+        <section class="brand"><span class="brand-mark">RA</span><div><div class="brand-title">RAG Admin</div><p class="brand-copy">Document browser with stored metadata, ACL insight, and source preview.</p></div></section>
+        <section class="sidebar-panel">
+          <p class="sidebar-kicker">Document Scope</p>
+          <div class="sidebar-metric"><strong id="shell-tenant">tenant-admin</strong><span>Focused tenant</span></div>
+          <div class="sidebar-metric"><strong id="shell-role">ADMIN</strong><span>Role permissions</span></div>
+          <div class="sidebar-metric"><strong id="shell-window">60000 ms</strong><span>Telemetry window</span></div>
+        </section>
         <nav class="nav-menu"></nav>
-      </section>
+      </aside>
 
-      <section class="grid">
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>Browse</h2>
-              <p>tenant 범위에서 문서를 조회하고 상세 문서를 선택합니다.</p>
-            </div>
-          </div>
-          <div class="stack">
-            <div class="triple">
-              <label>
-                Tenant ID
-                <input data-context="tenantId" value="tenant-admin" />
-              </label>
-              <label>
-                Query
-                <input id="docs-query" placeholder="doc id or metadata" />
-              </label>
-              <label>
-                Limit
-                <input id="docs-limit" type="number" value="100" />
-              </label>
-            </div>
-            <div class="actions">
-              <button id="btn-documents-refresh">Refresh Documents</button>
-            </div>
-            <div class="notice" id="documents-notice"></div>
-            <div id="documents-table"></div>
-          </div>
-        </article>
+      <section class="content-area">
+        <header class="page-header">
+          <div><p class="eyebrow">Document Browser</p><h1>Document Ledger</h1><p class="lead">문서 목록, 상세, ACL/metadata, 재색인, 삭제, source preview를 대시보드 셸 안에서 처리합니다.</p></div>
+          <div class="header-badges"><span class="badge" id="badge-base"></span><span class="badge" id="badge-api"></span><span class="badge" id="badge-window"></span><span class="badge" id="badge-role"></span></div>
+        </header>
 
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>Detail &amp; Actions</h2>
-              <p>선택한 문서를 조회하고 재색인/삭제/source preview를 실행합니다.</p>
+        <section class="grid">
+          <article class="panel">
+            <div class="panel-header"><div><h2>Browse Filters</h2><p>tenant 범위에서 문서를 검색하고 목록을 새로고침합니다.</p></div></div>
+            <div class="stack">
+              <div class="triple">
+                <label>Tenant ID<input data-context="tenantId" value="tenant-admin" /></label>
+                <label>Query<input id="docs-query" placeholder="doc id or metadata" /></label>
+                <label>Limit<input id="docs-limit" type="number" value="100" /></label>
+              </div>
+              <div class="actions"><button id="btn-documents-refresh">Refresh Documents</button></div>
+              <div class="notice" id="documents-notice"></div>
+              <div id="documents-table"></div>
             </div>
-          </div>
-          <div class="stack">
-            <div class="dual">
-              <label>
-                Selected Tenant
-                <input id="docs-selected-tenant" />
-              </label>
-              <label>
-                Selected Doc ID
-                <input id="docs-selected-id" />
-              </label>
-            </div>
-            <div class="dual">
-              <label>
-                Source URI
-                <input id="docs-selected-source" />
-              </label>
-              <label>
-                Charset
-                <input id="docs-selected-charset" value="UTF-8" />
-              </label>
-            </div>
-            <div class="dual">
-              <label>
-                ACL
-                <textarea id="docs-selected-acl"></textarea>
-              </label>
-              <label>
-                Metadata (`key=value`)
-                <textarea id="docs-selected-metadata"></textarea>
-              </label>
-            </div>
-            <label>
-              Reindex Text Override
-              <textarea id="docs-selected-text" placeholder="비워두면 sourceUri 또는 기존 원문을 사용합니다."></textarea>
-            </label>
-            <div class="triple">
-              <label>
-                Preview Chunk
-                <select id="docs-selected-chunk"></select>
-              </label>
-              <label>
-                Preview Context Chars
-                <input id="docs-preview-context" type="number" value="140" />
-              </label>
-              <div class="actions">
-                <button class="secondary" id="btn-document-detail">Load Detail</button>
-                <button class="secondary" id="btn-document-preview">Source Preview</button>
-                <button id="btn-document-reindex">Reindex</button>
-                <button class="secondary" id="btn-document-delete">Delete</button>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header"><div><h2>Detail Workspace</h2><p>선택 문서의 상세 정보와 운영 액션을 한 카드에서 처리합니다.</p></div></div>
+            <div class="stack">
+              <div class="dual">
+                <label>Selected Tenant<input id="docs-selected-tenant" /></label>
+                <label>Selected Doc ID<input id="docs-selected-id" /></label>
+              </div>
+              <div class="dual">
+                <label>Source URI<input id="docs-selected-source" /></label>
+                <label>Charset<input id="docs-selected-charset" value="UTF-8" /></label>
+              </div>
+              <div class="dual">
+                <label>ACL<textarea id="docs-selected-acl"></textarea></label>
+                <label>Metadata (`key=value`)<textarea id="docs-selected-metadata"></textarea></label>
+              </div>
+              <label>Reindex Text Override<textarea id="docs-selected-text" placeholder="비워두면 sourceUri 또는 기존 원문을 사용합니다."></textarea></label>
+              <div class="triple">
+                <label>Preview Chunk<select id="docs-selected-chunk"></select></label>
+                <label>Preview Context Chars<input id="docs-preview-context" type="number" value="140" /></label>
+                <div class="actions">
+                  <button class="secondary" id="btn-document-detail">Load Detail</button>
+                  <button class="secondary" id="btn-document-preview">Source Preview</button>
+                  <button id="btn-document-reindex">Reindex</button>
+                  <button class="secondary" id="btn-document-delete">Delete</button>
+                </div>
               </div>
             </div>
-          </div>
-        </article>
+          </article>
 
-        <article class="panel full">
-          <div class="panel-header">
-            <div>
-              <h2>Outputs</h2>
-              <p>문서 목록, 상세, 작업 응답, source preview를 JSON으로 표시합니다.</p>
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Document Summary</h2><p>문서 수, 청크 수, content kind, source 분포를 요약합니다.</p></div></div>
+            <div class="analytic-grid" id="document-analytics"></div>
+            <div id="document-bars"></div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Chunk Timeline</h2><p>선택한 문서의 chunk/page/offset 흐름을 타임라인으로 확인합니다.</p></div></div>
+            <div id="document-timeline"></div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Document Spotlight</h2><p>선택 문서의 ACL, metadata, source, chunk 구성을 카드형으로 요약합니다.</p></div></div>
+            <div id="document-detail-cards"></div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Document Feeds</h2><p>목록, 상세, 액션 응답, source preview를 나란히 봅니다.</p></div></div>
+            <div class="grid">
+              <div class="stack"><strong>Documents</strong><pre id="output-documents">{}</pre></div>
+              <div class="stack"><strong>Document Detail</strong><pre id="output-document-detail">{}</pre></div>
+              <div class="stack"><strong>Action Response</strong><pre id="output-document-action">{}</pre></div>
+              <div class="stack"><strong>Source Preview</strong><pre id="output-source-preview">{}</pre></div>
             </div>
-          </div>
-          <div class="grid">
-            <div class="stack">
-              <strong>Documents</strong>
-              <pre id="output-documents">{}</pre>
-            </div>
-            <div class="stack">
-              <strong>Document Detail</strong>
-              <pre id="output-document-detail">{}</pre>
-            </div>
-            <div class="stack">
-              <strong>Action Response</strong>
-              <pre id="output-document-action">{}</pre>
-            </div>
-            <div class="stack">
-              <strong>Source Preview</strong>
-              <pre id="output-source-preview">{}</pre>
-            </div>
-          </div>
-        </article>
+          </article>
+        </section>
       </section>
     </main>
 
-    <script>
-      window.RAG_ADMIN_CONFIG = __RAG_ADMIN_CONFIG__;
-    </script>
+    <script>window.RAG_ADMIN_CONFIG = __RAG_ADMIN_CONFIG__;</script>
     <script src="assets/app.js"></script>
   </body>
 </html>

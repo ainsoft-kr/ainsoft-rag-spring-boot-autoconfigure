@@ -7,90 +7,60 @@
     <link rel="stylesheet" href="assets/app.css" />
   </head>
   <body data-page="provider-history">
-    <main>
-      <section class="hero">
-        <div class="hero-top">
-          <div>
-            <span class="eyebrow">Provider History</span>
-            <h1>Provider Settings &amp; Health History</h1>
-            <p class="lead">
-              현재 provider 상태와 최근 이력, fallback 이벤트를 조회합니다.
-            </p>
-          </div>
-          <div class="badge-row">
-            <span class="badge" id="badge-base"></span>
-            <span class="badge" id="badge-api"></span>
-            <span class="badge" id="badge-window"></span>
-            <span class="badge" id="badge-role"></span>
-          </div>
-        </div>
-
+    <main class="dashboard-shell">
+      <aside class="sidebar">
+        <section class="brand"><span class="brand-mark">RA</span><div><div class="brand-title">RAG Admin</div><p class="brand-copy">Provider telemetry monitor tuned for latency, failures, and fallback behavior.</p></div></section>
+        <section class="sidebar-panel">
+          <p class="sidebar-kicker">Telemetry Scope</p>
+          <div class="sidebar-metric"><strong id="shell-tenant">tenant-admin</strong><span>Recent context</span></div>
+          <div class="sidebar-metric"><strong id="shell-role">ADMIN</strong><span>Role permissions</span></div>
+          <div class="sidebar-metric"><strong id="shell-window">60000 ms</strong><span>Default telemetry window</span></div>
+        </section>
         <nav class="nav-menu"></nav>
-      </section>
+      </aside>
 
-      <section class="grid">
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>Query Options</h2>
-              <p>recent provider window와 이력 길이를 조절합니다.</p>
-            </div>
-          </div>
-          <div class="stack">
-            <div class="dual">
-              <label>
-                Recent Provider Window (ms)
-                <input data-context="recentProviderWindowMillis" type="number" value="60000" />
-              </label>
-              <label>
-                History Limit
-                <input id="provider-limit" type="number" value="120" />
-              </label>
-            </div>
-            <div class="actions">
-              <button id="btn-provider-refresh">Refresh Provider History</button>
-            </div>
-            <div class="notice" id="provider-notice"></div>
-          </div>
-        </article>
+      <section class="content-area">
+        <header class="page-header">
+          <div><p class="eyebrow">Provider History</p><h1>Provider Telemetry Board</h1><p class="lead">현재 provider 상태와 최근 이력, fallback 이벤트를 금융 대시보드식 레이아웃으로 추적합니다.</p></div>
+          <div class="header-badges"><span class="badge" id="badge-base"></span><span class="badge" id="badge-api"></span><span class="badge" id="badge-window"></span><span class="badge" id="badge-role"></span></div>
+        </header>
 
-        <article class="panel full">
-          <div class="panel-header">
-            <div>
-              <h2>History Tables</h2>
-              <p>provider 샘플과 fallback 이벤트를 표로 보여 줍니다.</p>
-            </div>
-          </div>
-          <div class="stack">
-            <div id="provider-history-table"></div>
-            <div id="provider-fallbacks-table"></div>
-          </div>
-        </article>
-
-        <article class="panel full">
-          <div class="panel-header">
-            <div>
-              <h2>Outputs</h2>
-              <p>현재 health와 provider history 응답 전문입니다.</p>
-            </div>
-          </div>
-          <div class="grid">
+        <section class="grid">
+          <article class="panel">
+            <div class="panel-header"><div><h2>Sampling Controls</h2><p>recent window와 이력 길이를 조절합니다.</p></div></div>
             <div class="stack">
-              <strong>Provider Health</strong>
-              <pre id="output-provider-health">{}</pre>
+              <div class="dual">
+                <label>Recent Provider Window (ms)<input data-context="recentProviderWindowMillis" type="number" value="60000" /></label>
+                <label>History Limit<input id="provider-limit" type="number" value="120" /></label>
+              </div>
+              <div class="actions"><button id="btn-provider-refresh">Refresh Provider History</button></div>
+              <div class="notice" id="provider-notice"></div>
             </div>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Provider Tables</h2><p>provider 샘플과 fallback 이벤트를 표로 봅니다.</p></div></div>
             <div class="stack">
-              <strong>Provider History</strong>
-              <pre id="output-provider-history">{}</pre>
+              <div class="analytic-grid" id="provider-analytics"></div>
+              <div id="provider-endpoint-bars"></div>
+              <div id="provider-latency-chart"></div>
+              <div id="provider-history-table"></div>
+              <div id="provider-fallbacks-table"></div>
             </div>
-          </div>
-        </article>
+          </article>
+
+          <article class="panel full">
+            <div class="panel-header"><div><h2>Telemetry Feed</h2><p>현재 provider health와 history 응답 전문입니다.</p></div></div>
+            <div class="grid">
+              <div class="stack"><strong>Provider Health</strong><pre id="output-provider-health">{}</pre></div>
+              <div class="stack"><strong>Provider History</strong><pre id="output-provider-history">{}</pre></div>
+            </div>
+          </article>
+        </section>
       </section>
     </main>
 
-    <script>
-      window.RAG_ADMIN_CONFIG = __RAG_ADMIN_CONFIG__;
-    </script>
+    <script>window.RAG_ADMIN_CONFIG = __RAG_ADMIN_CONFIG__;</script>
     <script src="assets/app.js"></script>
   </body>
 </html>
