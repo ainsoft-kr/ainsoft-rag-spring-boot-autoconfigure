@@ -66,7 +66,7 @@ class RagAdminAutoConfigurationTest {
         contextRunner.run { context ->
             val controller = context.getBean(RagAdminUiController::class.java)
             val html = controller.page(MockHttpServletRequest(), "documents")
-            assertTrue(html.contains("Document Browser"))
+            assertTrue(html.contains("Browse Filters"))
         }
     }
 }

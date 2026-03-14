@@ -229,6 +229,9 @@
     setText("shell-role", config.currentRole || "ANONYMOUS");
     setText("shell-tenant", context.tenantId || "-");
     setText("shell-window", `${context.recentProviderWindowMillis || 0} ms`);
+    setText("topbar-role", config.currentRole || "ANONYMOUS");
+    setText("topbar-tenant", context.tenantId || "-");
+    setText("topbar-window", `${context.recentProviderWindowMillis || 0} ms`);
   }
 
   function renderTrendBars(values) {
@@ -257,66 +260,71 @@
         <div class="topbar-title">${route.board} / ${route.label}</div>
       </div>
       <div class="topbar-meta">
-        <span class="topbar-pill">Starter Embedded</span>
-        <span class="topbar-pill">Feature ${route.feature}</span>
-        <span class="topbar-pill">${config.securityEnabled ? "Protected" : "Open Access"}</span>
+        <span class="topbar-pill">Tenant <strong id="topbar-tenant"></strong></span>
+        <span class="topbar-pill">Role <strong id="topbar-role"></strong></span>
+        <span class="topbar-pill">Window <strong id="topbar-window"></strong></span>
       </div>
     `;
 
-    const strip = document.createElement("section");
-    strip.className = "market-strip";
-    const context = loadContext();
-    const metrics = [
-      {
-        label: "Tenant Scope",
-        value: context.tenantId || "-",
-        foot: "Shared across pages",
-        trend: [20, 28, 24, 34, 40, 36]
-      },
-      {
-        label: "Feature Access",
-        value: String((config.allowedFeatures || []).length),
-        foot: "Visible menu entries",
-        trend: [18, 22, 26, 24, 30, 34]
-      },
-      {
-        label: "Role State",
-        value: config.currentRole || "OPEN",
-        foot: config.securityEnabled ? "Security enabled" : "Security disabled",
-        trend: [16, 20, 18, 24, 28, 32]
-      },
-      {
-        label: "Provider Window",
-        value: `${context.recentProviderWindowMillis || 0} ms`,
-        foot: "Telemetry horizon",
-        trend: [12, 16, 20, 28, 26, 30]
-      }
-    ];
-
-    metrics.forEach((metric) => {
-      const card = document.createElement("article");
-      card.className = "strip-card";
-
-      const head = document.createElement("div");
-      head.className = "strip-card-head";
-      head.innerHTML = `<span>${metric.label}</span><span>${route.section}</span>`;
-      card.appendChild(head);
-
-      const strong = document.createElement("strong");
-      strong.textContent = metric.value;
-      card.appendChild(strong);
-      card.appendChild(renderTrendBars(metric.trend));
-
-      const foot = document.createElement("div");
-      foot.className = "strip-foot";
-      foot.textContent = metric.foot;
-      card.appendChild(foot);
-
-      strip.appendChild(card);
-    });
-
-    area.prepend(strip);
     area.prepend(topbar);
+
+    if (document.body.dataset.page === "overview") {
+      const strip = document.createElement("section");
+      strip.className = "market-strip";
+      const context = loadContext();
+      const metrics = [
+        {
+          label: "Tenant Scope",
+          value: context.tenantId || "-",
+          foot: "Shared across pages",
+          trend: [20, 28, 24, 34, 40, 36]
+        },
+        {
+          label: "Feature Access",
+          value: String((config.allowedFeatures || []).length),
+          foot: "Visible menu entries",
+          trend: [18, 22, 26, 24, 30, 34]
+        },
+        {
+          label: "Role State",
+          value: config.currentRole || "OPEN",
+          foot: config.securityEnabled ? "Security enabled" : "Security disabled",
+          trend: [16, 20, 18, 24, 28, 32]
+        },
+        {
+          label: "Provider Window",
+          value: `${context.recentProviderWindowMillis || 0} ms`,
+          foot: "Telemetry horizon",
+          trend: [12, 16, 20, 28, 26, 30]
+        }
+      ];
+
+      metrics.forEach((metric) => {
+        const card = document.createElement("article");
+        card.className = "strip-card";
+
+        const head = document.createElement("div");
+        head.className = "strip-card-head";
+        head.innerHTML = `<span>${metric.label}</span><span>${route.section}</span>`;
+        card.appendChild(head);
+
+        const strong = document.createElement("strong");
+        strong.textContent = metric.value;
+        card.appendChild(strong);
+        card.appendChild(renderTrendBars(metric.trend));
+
+        const foot = document.createElement("div");
+        foot.className = "strip-foot";
+        foot.textContent = metric.foot;
+        card.appendChild(foot);
+
+        strip.appendChild(card);
+      });
+
+      area.insertBefore(strip, topbar.nextSibling);
+    }
+
+    updateShellMeta();
   }
 
   async function request(path, options) {
