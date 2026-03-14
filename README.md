@@ -48,6 +48,16 @@ rag:
 ./gradlew build
 ```
 
+## Docs
+
+Kotlin API 문서는 Dokka로 생성합니다.
+
+```bash
+./gradlew docs
+```
+
+생성 결과는 `build/dokka/html/index.html`에 있습니다.
+
 로컬에서 엔진을 배포 없이 소비하려면 먼저 [ainsoft-rag-engine](/Users/ygpark2/pjt/ainsoft/rag/ainsoft-rag-engine) 을 `mavenLocal()`에 publish 해야 합니다.
 
 ```bash

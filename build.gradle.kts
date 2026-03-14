@@ -17,6 +17,7 @@ fun Project.propertyOrEnv(propertyName: String, envName: String): String? =
 plugins {
     kotlin("jvm") version "2.3.0"
     kotlin("kapt") version "2.3.0"
+    id("org.jetbrains.dokka") version "1.9.20"
     `java-library`
     id("maven-publish")
     id("signing")
@@ -47,6 +48,8 @@ dependencies {
 
     api("org.springframework.boot:spring-boot-autoconfigure:3.3.2")
     compileOnly("org.springframework.boot:spring-boot-starter-web:3.3.2")
+    implementation("org.apache.lucene:lucene-core:10.3.2")
+    implementation("org.apache.lucene:lucene-queryparser:10.3.2")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")
 
     kapt("org.springframework.boot:spring-boot-configuration-processor:3.3.2")
@@ -64,6 +67,16 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+}
+
+tasks.named("dokkaHtml").configure {
+    group = "documentation"
+}
+
+tasks.register("docs") {
+    group = "documentation"
+    description = "Generate Dokka HTML documentation."
+    dependsOn("dokkaHtml")
 }
 
 val placeholderDir = layout.buildDirectory.dir("generated/publication-placeholders")

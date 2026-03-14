@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 
 @AutoConfiguration(after = [RagAutoConfiguration::class])
 @ConditionalOnClass(name = ["org.springframework.web.servlet.DispatcherServlet"])
@@ -22,8 +23,49 @@ class RagAdminAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    fun ragAdminUiController(properties: RagAdminProperties): RagAdminUiController =
-        RagAdminUiController(properties)
+    fun ragAdminUiController(
+        properties: RagAdminProperties,
+        securityService: RagAdminSecurityService
+    ): RagAdminUiController =
+        RagAdminUiController(properties, securityService)
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun ragAdminService(
+        engine: RagEngine,
+        properties: RagProperties,
+        adminProperties: RagAdminProperties,
+        ragConfig: RagConfig,
+        embeddingProvider: EmbeddingProvider
+    ): RagAdminService = RagAdminService(
+        engine = engine,
+        properties = properties,
+        adminProperties = adminProperties,
+        ragConfig = ragConfig,
+        embeddingProvider = embeddingProvider
+    )
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun ragAdminSecurityService(
+        adminProperties: RagAdminProperties,
+        adminService: RagAdminService
+    ): RagAdminSecurityService = RagAdminSecurityService(adminProperties, adminService)
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun ragAdminSecurityInterceptor(
+        adminProperties: RagAdminProperties,
+        securityService: RagAdminSecurityService,
+        adminService: RagAdminService
+    ): RagAdminSecurityInterceptor = RagAdminSecurityInterceptor(adminProperties, securityService, adminService)
+
+    @Bean
+    @ConditionalOnMissingBean(name = ["ragAdminWebMvcConfigurer"])
+    fun ragAdminWebMvcConfigurer(
+        adminProperties: RagAdminProperties,
+        interceptor: RagAdminSecurityInterceptor
+    ): WebMvcConfigurer = RagAdminWebMvcConfiguration(adminProperties, interceptor)
 
     @Bean
     @ConditionalOnMissingBean
@@ -31,12 +73,16 @@ class RagAdminAutoConfiguration {
         engine: RagEngine,
         properties: RagProperties,
         ragConfig: RagConfig,
-        embeddingProvider: EmbeddingProvider
+        embeddingProvider: EmbeddingProvider,
+        adminService: RagAdminService,
+        securityService: RagAdminSecurityService
     ): RagAdminApiController = RagAdminApiController(
         engine = engine,
         properties = properties,
         ragConfig = ragConfig,
-        embeddingProvider = embeddingProvider
+        embeddingProvider = embeddingProvider,
+        adminService = adminService,
+        securityService = securityService
     )
 
     @Bean

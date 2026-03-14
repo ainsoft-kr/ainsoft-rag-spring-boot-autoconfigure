@@ -16,6 +16,7 @@ import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.mock.web.MockHttpServletRequest
 
 class RagAdminAutoConfigurationTest {
     private val contextRunner = WebApplicationContextRunner()
@@ -51,11 +52,20 @@ class RagAdminAutoConfigurationTest {
                 "rag.admin.default-recent-provider-window-millis=12345"
             )
             .run { context ->
-                val html = context.getBean(RagAdminUiController::class.java).index()
+                val html = context.getBean(RagAdminUiController::class.java).index(MockHttpServletRequest())
                 assertTrue(html.contains("\"basePath\":\"/console/rag\""))
                 assertTrue(html.contains("\"apiBasePath\":\"/internal/rag-admin\""))
                 assertTrue(html.contains("\"defaultRecentProviderWindowMillis\":12345"))
             }
+    }
+
+    @Test
+    fun `additional admin pages are rendered`() {
+        contextRunner.run { context ->
+            val controller = context.getBean(RagAdminUiController::class.java)
+            val html = controller.page(MockHttpServletRequest(), "documents")
+            assertTrue(html.contains("Document Browser"))
+        }
     }
 }
 

@@ -12,8 +12,11 @@ import com.ainsoft.rag.embeddings.EmbeddingProvider
 import com.ainsoft.rag.impl.providerTelemetrySnapshot
 import com.ainsoft.rag.parsers.PlainTextParser
 import com.ainsoft.rag.parsers.TikaDocumentParser
+import jakarta.servlet.http.HttpServletRequest
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -29,17 +32,30 @@ class RagAdminApiController(
     private val engine: RagEngine,
     private val properties: RagProperties,
     private val ragConfig: RagConfig,
-    private val embeddingProvider: EmbeddingProvider
+    private val embeddingProvider: EmbeddingProvider,
+    private val adminService: RagAdminService,
+    private val securityService: RagAdminSecurityService
 ) {
     private val plainTextParser = PlainTextParser()
     private val tikaDocumentParser = TikaDocumentParser()
 
     @PostMapping("/ingest")
-    fun ingest(@RequestBody request: RagAdminIngestRequest): RagAdminIngestResponse {
+    fun ingest(
+        requestContext: HttpServletRequest,
+        @RequestBody request: RagAdminIngestRequest
+    ): RagAdminIngestResponse {
+        val access = securityService.requireFeature(requestContext, "text-ingest")
         require(request.acl.isNotEmpty()) { "acl must not be empty" }
         require(request.text.isNotBlank()) { "text must not be blank" }
         val normalizedTenantId = normalizeIdentifier(request.tenantId, "tenantId")
         val normalizedDocId = normalizeIdentifier(request.docId, "docId")
+        val jobId = adminService.startJob(
+            jobType = "ingest",
+            tenantId = normalizedTenantId,
+            role = access.role,
+            description = "text ingest for $normalizedDocId",
+            payload = mapOf("tenantId" to normalizedTenantId, "docId" to normalizedDocId)
+        )
         engine.upsert(
             UpsertDocumentRequest(
                 tenantId = normalizedTenantId,
@@ -58,6 +74,8 @@ class RagAdminApiController(
                 }
             )
         )
+        adminService.completeJob(jobId, "SUCCESS", "document ingested")
+        adminService.recordProviderSnapshot("ingest")
         return RagAdminIngestResponse(
             status = "ingested",
             tenantId = normalizedTenantId,
@@ -70,6 +88,7 @@ class RagAdminApiController(
         consumes = [MediaType.MULTIPART_FORM_DATA_VALUE]
     )
     fun ingestFile(
+        requestContext: HttpServletRequest,
         @RequestParam tenantId: String,
         @RequestParam docId: String,
         @RequestParam acl: List<String>,
@@ -79,6 +98,7 @@ class RagAdminApiController(
         @RequestParam(required = false, defaultValue = "UTF-8") charset: String,
         @RequestParam(required = false) metadata: String?
     ): RagAdminIngestResponse {
+        val access = securityService.requireFeature(requestContext, "file-ingest")
         val normalizedTenantId = normalizeIdentifier(tenantId, "tenantId")
         val normalizedDocId = normalizeIdentifier(docId, "docId")
         require(acl.isNotEmpty()) { "acl must not be empty" }
@@ -97,6 +117,17 @@ class RagAdminApiController(
 
         val normalizedFilename = normalizeFilename(file.originalFilename)
         val effectiveSourceUri = sourceUri ?: normalizedFilename?.let { "upload://$it" }
+        val jobId = adminService.startJob(
+            jobType = "ingest-file",
+            tenantId = normalizedTenantId,
+            role = access.role,
+            description = "file ingest for $normalizedDocId",
+            payload = mapOf(
+                "tenantId" to normalizedTenantId,
+                "docId" to normalizedDocId,
+                "filename" to (normalizedFilename ?: "")
+            )
+        )
         val parsed = if (isBinaryDoc(file.originalFilename)) {
             tikaDocumentParser.parseBytes(file.bytes, sourceUri = effectiveSourceUri, page = page)
         } else {
@@ -116,6 +147,8 @@ class RagAdminApiController(
                 pageMarkers = parsed.pageMarkers
             )
         )
+        adminService.completeJob(jobId, "SUCCESS", "file ingested")
+        adminService.recordProviderSnapshot("ingest-file")
         return RagAdminIngestResponse(
             status = "ingested",
             tenantId = normalizedTenantId,
@@ -124,7 +157,11 @@ class RagAdminApiController(
     }
 
     @PostMapping("/search")
-    fun search(@RequestBody request: RagAdminSearchRequest): RagAdminSearchResponse {
+    fun search(
+        requestContext: HttpServletRequest,
+        @RequestBody request: RagAdminSearchRequest
+    ): RagAdminSearchResponse {
+        val access = securityService.requireFeature(requestContext, "search")
         require(request.principals.isNotEmpty()) { "principals must not be empty" }
         require(request.query.isNotBlank()) { "query must not be blank" }
 
@@ -140,7 +177,7 @@ class RagAdminApiController(
         val globalProviderHealth = providerTelemetrySnapshot()
         val recentProviderHealth = request.recentProviderWindowMillis?.let { providerTelemetrySnapshot(it) }
 
-        return RagAdminSearchResponse(
+        val result = RagAdminSearchResponse(
             tenantId = request.tenantId,
             query = request.query,
             hits = response.hits.map { hit ->
@@ -162,10 +199,16 @@ class RagAdminApiController(
             recentProviderWindowMillis = request.recentProviderWindowMillis,
             recentProviderTelemetry = recentProviderHealth?.toResponse(request.providerHealthDetail)
         )
+        adminService.recordSearchAudit("search", access.role, request, result.hits.size, result.telemetry)
+        return result
     }
 
     @PostMapping("/diagnose-search")
-    fun diagnoseSearch(@RequestBody request: RagAdminSearchRequest): RagAdminSearchDiagnosticsResponse {
+    fun diagnoseSearch(
+        requestContext: HttpServletRequest,
+        @RequestBody request: RagAdminSearchRequest
+    ): RagAdminSearchDiagnosticsResponse {
+        val access = securityService.requireFeature(requestContext, "search")
         require(request.principals.isNotEmpty()) { "principals must not be empty" }
         require(request.query.isNotBlank()) { "query must not be blank" }
 
@@ -187,7 +230,7 @@ class RagAdminApiController(
         val globalProviderHealth = providerTelemetrySnapshot()
         val recentProviderHealth = request.recentProviderWindowMillis?.let { providerTelemetrySnapshot(it) }
 
-        return RagAdminSearchDiagnosticsResponse(
+        val result = RagAdminSearchDiagnosticsResponse(
             tenantId = request.tenantId,
             query = request.query,
             tenantDocs = diagnostics.tenantDocs,
@@ -204,35 +247,285 @@ class RagAdminApiController(
             recentProviderWindowMillis = request.recentProviderWindowMillis,
             recentProviderTelemetry = recentProviderHealth?.toResponse(request.providerHealthDetail)
         )
+        adminService.recordSearchAudit(
+            auditType = "diagnose-search",
+            role = access.role,
+            request = request,
+            resultCount = result.vectorMatchesWithAcl + result.lexicalMatchesWithAcl,
+            telemetry = result.telemetry
+        )
+        return result
     }
 
     @GetMapping("/stats")
     fun stats(
+        requestContext: HttpServletRequest,
         @RequestParam tenantId: String?,
         @RequestParam(required = false) recentProviderWindowMillis: Long?
     ): RagAdminStatsResponse {
+        securityService.requireFeature(requestContext, "overview")
         val stats = engine.stats(tenantId)
         val globalProviderHealth = providerTelemetrySnapshot()
         val recentProviderHealth = recentProviderWindowMillis?.let { providerTelemetrySnapshot(it) }
-        return stats.toResponse(
+        val response = stats.toResponse(
             providerTelemetry = globalProviderHealth.toResponse(),
             recentProviderWindowMillis = recentProviderWindowMillis,
             recentProviderTelemetry = recentProviderHealth?.toResponse()
         )
+        adminService.recordProviderSnapshot("stats")
+        return response
     }
 
     @GetMapping("/provider-health")
     fun providerHealth(
+        requestContext: HttpServletRequest,
         @RequestParam(required = false) recentProviderWindowMillis: Long?,
         @RequestParam(required = false, defaultValue = "true") detailed: Boolean
     ): RagAdminProviderHealthResponse {
+        securityService.requireFeature(requestContext, "provider-history")
         val globalProviderHealth = providerTelemetrySnapshot()
         val recentProviderHealth = recentProviderWindowMillis?.let { providerTelemetrySnapshot(it) }
-        return RagAdminProviderHealthResponse(
+        val response = RagAdminProviderHealthResponse(
             providerTelemetry = globalProviderHealth.toResponse(detailed),
             recentProviderWindowMillis = recentProviderWindowMillis,
             recentProviderTelemetry = recentProviderHealth?.toResponse(detailed)
         )
+        adminService.recordProviderSnapshot("provider-health")
+        return response
+    }
+
+    @GetMapping("/documents")
+    fun documents(
+        requestContext: HttpServletRequest,
+        @RequestParam(required = false) tenantId: String?,
+        @RequestParam(required = false) query: String?,
+        @RequestParam(required = false, defaultValue = "100") limit: Int
+    ): RagAdminDocumentListResponse {
+        securityService.requireFeature(requestContext, "documents")
+        return adminService.listDocuments(tenantId, query, limit)
+    }
+
+    @GetMapping("/documents/{tenantId}/{docId}")
+    fun documentDetail(
+        requestContext: HttpServletRequest,
+        @PathVariable tenantId: String,
+        @PathVariable docId: String
+    ): RagAdminDocumentDetail {
+        securityService.requireFeature(requestContext, "documents")
+        return adminService.getDocumentDetail(tenantId, docId)
+    }
+
+    @DeleteMapping("/documents/{tenantId}/{docId}")
+    fun deleteDocument(
+        requestContext: HttpServletRequest,
+        @PathVariable tenantId: String,
+        @PathVariable docId: String
+    ): RagAdminOperationResponse {
+        val access = securityService.requireFeature(requestContext, "documents")
+        val jobId = adminService.startJob(
+            "delete-document",
+            tenantId,
+            access.role,
+            "delete document $docId",
+            mapOf("tenantId" to tenantId, "docId" to docId)
+        )
+        val response = adminService.deleteDocument(tenantId, docId)
+        adminService.completeJob(jobId, "SUCCESS", response.message)
+        return response
+    }
+
+    @PostMapping("/documents/{tenantId}/{docId}/reindex")
+    fun reindexDocument(
+        requestContext: HttpServletRequest,
+        @PathVariable tenantId: String,
+        @PathVariable docId: String,
+        @RequestBody(required = false) request: RagAdminDocumentReindexRequest?
+    ): RagAdminOperationResponse {
+        val access = securityService.requireFeature(requestContext, "documents")
+        val jobId = adminService.startJob(
+            "reindex-document",
+            tenantId,
+            access.role,
+            "reindex document $docId",
+            mapOf("tenantId" to tenantId, "docId" to docId),
+            retryKind = "reindex-document"
+        )
+        val response = adminService.reindexDocument(tenantId, docId, request ?: RagAdminDocumentReindexRequest())
+        adminService.completeJob(jobId, "SUCCESS", response.message)
+        return response
+    }
+
+    @GetMapping("/documents/{tenantId}/{docId}/source-preview")
+    fun sourcePreview(
+        requestContext: HttpServletRequest,
+        @PathVariable tenantId: String,
+        @PathVariable docId: String,
+        @RequestParam(required = false) chunkId: String?,
+        @RequestParam(required = false, defaultValue = "160") contextChars: Int,
+        @RequestParam(required = false, defaultValue = "UTF-8") charset: String,
+        @RequestParam(required = false) profileName: String?
+    ): RagAdminSourcePreviewResponse {
+        securityService.requireFeature(requestContext, "documents")
+        return adminService.sourcePreview(tenantId, docId, chunkId, contextChars, charset, profileName)
+    }
+
+    @GetMapping("/tenants")
+    fun tenants(requestContext: HttpServletRequest): RagAdminTenantListResponse {
+        securityService.requireFeature(requestContext, "tenants")
+        return adminService.listTenants()
+    }
+
+    @GetMapping("/tenants/{tenantId}")
+    fun tenantDetail(
+        requestContext: HttpServletRequest,
+        @PathVariable tenantId: String
+    ): RagAdminTenantDetail {
+        securityService.requireFeature(requestContext, "tenants")
+        return adminService.tenantDetail(tenantId)
+    }
+
+    @DeleteMapping("/tenants/{tenantId}")
+    fun deleteTenant(
+        requestContext: HttpServletRequest,
+        @PathVariable tenantId: String
+    ): RagAdminOperationResponse {
+        val access = securityService.requireFeature(requestContext, "tenants")
+        val jobId = adminService.startJob(
+            "delete-tenant",
+            tenantId,
+            access.role,
+            "delete tenant $tenantId",
+            mapOf("tenantId" to tenantId)
+        )
+        val response = adminService.deleteTenant(tenantId)
+        adminService.completeJob(jobId, "SUCCESS", response.message)
+        return response
+    }
+
+    @PostMapping("/operations/snapshot")
+    fun snapshot(
+        requestContext: HttpServletRequest,
+        @RequestParam tag: String
+    ): RagAdminOperationResponse {
+        val access = securityService.requireFeature(requestContext, "tenants")
+        val jobId = adminService.startJob("snapshot", null, access.role, "snapshot $tag", mapOf("tag" to tag))
+        val response = adminService.snapshot(tag)
+        adminService.completeJob(jobId, "SUCCESS", response.message)
+        return response
+    }
+
+    @PostMapping("/operations/restore")
+    fun restore(
+        requestContext: HttpServletRequest,
+        @RequestParam tag: String
+    ): RagAdminOperationResponse {
+        val access = securityService.requireFeature(requestContext, "tenants")
+        val jobId = adminService.startJob("restore", null, access.role, "restore $tag", mapOf("tag" to tag))
+        val response = adminService.restore(tag)
+        adminService.completeJob(jobId, "SUCCESS", response.message)
+        return response
+    }
+
+    @PostMapping("/operations/optimize")
+    fun optimize(requestContext: HttpServletRequest): RagAdminOperationResponse {
+        val access = securityService.requireFeature(requestContext, "tenants")
+        val jobId = adminService.startJob("optimize", null, access.role, "optimize index", emptyMap())
+        val response = adminService.optimize()
+        adminService.completeJob(jobId, if (response.success) "SUCCESS" else "FAILED", response.message)
+        return response
+    }
+
+    @PostMapping("/operations/rebuild-metadata")
+    fun rebuildMetadata(
+        requestContext: HttpServletRequest,
+        @RequestParam(required = false) tenantId: String?
+    ): RagAdminOperationResponse {
+        val access = securityService.requireFeature(requestContext, "tenants")
+        val jobId = adminService.startJob(
+            "rebuild-metadata",
+            tenantId,
+            access.role,
+            "rebuild tenant metadata",
+            mapOf("tenantId" to tenantId)
+        )
+        val response = adminService.rebuildMetadata(tenantId)
+        adminService.completeJob(jobId, if (response.success) "SUCCESS" else "FAILED", response.message)
+        return response
+    }
+
+    @GetMapping("/provider-history")
+    fun providerHistory(
+        requestContext: HttpServletRequest,
+        @RequestParam(required = false, defaultValue = "120") limit: Int
+    ): RagAdminProviderHistoryResponse {
+        securityService.requireFeature(requestContext, "provider-history")
+        return adminService.getProviderHistory(limit)
+    }
+
+    @GetMapping("/search-audit")
+    fun searchAudit(
+        requestContext: HttpServletRequest,
+        @RequestParam(required = false, defaultValue = "100") limit: Int
+    ): List<RagAdminSearchAuditEntry> {
+        securityService.requireFeature(requestContext, "search-audit")
+        return adminService.listSearchAudits(limit)
+    }
+
+    @GetMapping("/job-history")
+    fun jobHistory(
+        requestContext: HttpServletRequest,
+        @RequestParam(required = false, defaultValue = "100") limit: Int
+    ): List<RagAdminJobHistoryEntry> {
+        securityService.requireFeature(requestContext, "job-history")
+        return adminService.listJobHistory(limit)
+    }
+
+    @PostMapping("/job-history/{jobId}/retry")
+    fun retryJob(
+        requestContext: HttpServletRequest,
+        @PathVariable jobId: String
+    ): RagAdminOperationResponse {
+        securityService.requireFeature(requestContext, "job-history")
+        return adminService.retryJob(jobId)
+    }
+
+    @GetMapping("/access-security")
+    fun accessSecurity(requestContext: HttpServletRequest): RagAdminAccessSecurityResponse {
+        securityService.requireFeature(requestContext, "access-security")
+        return adminService.accessSecurity(securityService.currentRole(requestContext))
+    }
+
+    @GetMapping("/config")
+    fun config(requestContext: HttpServletRequest): RagAdminConfigInspectorResponse {
+        securityService.requireFeature(requestContext, "config")
+        return adminService.getConfigInspector()
+    }
+
+    @PostMapping("/bulk/text-ingest")
+    fun bulkTextIngest(
+        requestContext: HttpServletRequest,
+        @RequestBody request: RagAdminBulkTextIngestRequest
+    ): RagAdminBulkOperationResponse {
+        securityService.requireFeature(requestContext, "bulk-operations")
+        return adminService.bulkTextIngest(request)
+    }
+
+    @PostMapping("/bulk/delete")
+    fun bulkDelete(
+        requestContext: HttpServletRequest,
+        @RequestBody request: RagAdminBulkDeleteRequest
+    ): RagAdminBulkOperationResponse {
+        securityService.requireFeature(requestContext, "bulk-operations")
+        return adminService.bulkDelete(request)
+    }
+
+    @PostMapping("/bulk/metadata-patch")
+    fun bulkMetadataPatch(
+        requestContext: HttpServletRequest,
+        @RequestBody request: RagAdminBulkMetadataPatchRequest
+    ): RagAdminBulkOperationResponse {
+        securityService.requireFeature(requestContext, "bulk-operations")
+        return adminService.bulkMetadataPatch(request)
     }
 
     private fun parseMetadata(raw: String?): Map<String, String> {
@@ -431,7 +724,7 @@ data class ProviderScopeResponse(
     val p95LatencyMillis: Double
 )
 
-private fun com.ainsoft.rag.api.SearchTelemetry.toResponse(): RagAdminSearchTelemetryResponse =
+internal fun com.ainsoft.rag.api.SearchTelemetry.toResponse(): RagAdminSearchTelemetryResponse =
     RagAdminSearchTelemetryResponse(
         executedQuery = executedQuery,
         originalQuery = originalQuery,
@@ -448,7 +741,7 @@ private fun com.ainsoft.rag.api.SearchTelemetry.toResponse(): RagAdminSearchTele
         notes = notes
     )
 
-private fun com.ainsoft.rag.api.ProviderTelemetryStats.toResponse(
+internal fun com.ainsoft.rag.api.ProviderTelemetryStats.toResponse(
     detailed: Boolean = true
 ): ProviderTelemetryResponse = ProviderTelemetryResponse(
     requestCount = requestCount,
@@ -510,7 +803,7 @@ private fun com.ainsoft.rag.api.ProviderTelemetryStats.toResponse(
     }
 )
 
-private fun IndexStats.toResponse(
+internal fun IndexStats.toResponse(
     providerTelemetry: ProviderTelemetryResponse,
     recentProviderWindowMillis: Long?,
     recentProviderTelemetry: ProviderTelemetryResponse?

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ainsoft RAG Admin Search Audit</title>
+    <link rel="stylesheet" href="assets/app.css" />
+  </head>
+  <body data-page="search-audit">
+    <main>
+      <section class="hero">
+        <div class="hero-top">
+          <div>
+            <span class="eyebrow">Search Audit</span>
+            <h1>Search Audit</h1>
+            <p class="lead">
+              누가 어떤 query를 날렸고 결과가 어땠는지 조회합니다.
+            </p>
+          </div>
+          <div class="badge-row">
+            <span class="badge" id="badge-base"></span>
+            <span class="badge" id="badge-api"></span>
+            <span class="badge" id="badge-window"></span>
+            <span class="badge" id="badge-role"></span>
+          </div>
+        </div>
+
+        <nav class="nav-menu"></nav>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Audit Query</h2>
+              <p>최근 검색 감사 로그를 가져옵니다.</p>
+            </div>
+          </div>
+          <div class="stack">
+            <label>
+              Limit
+              <input id="audit-limit" type="number" value="100" />
+            </label>
+            <div class="actions">
+              <button id="btn-audit-refresh">Refresh Search Audit</button>
+            </div>
+            <div class="notice" id="audit-notice"></div>
+          </div>
+        </article>
+
+        <article class="panel full">
+          <div class="panel-header">
+            <div>
+              <h2>Audit Table</h2>
+              <p>검색 타입, tenant, 결과 수, fallback 여부를 표로 보여 줍니다.</p>
+            </div>
+          </div>
+          <div id="audit-table"></div>
+        </article>
+
+        <article class="panel full">
+          <div class="panel-header">
+            <div>
+              <h2>Output</h2>
+              <p>search audit 응답 전문입니다.</p>
+            </div>
+          </div>
+          <pre id="output-search-audit">{}</pre>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      window.RAG_ADMIN_CONFIG = __RAG_ADMIN_CONFIG__;
+    </script>
+    <script src="assets/app.js"></script>
+  </body>
+</html>

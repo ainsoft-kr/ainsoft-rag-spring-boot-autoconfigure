@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ainsoft RAG Admin Search</title>
+    <link rel="stylesheet" href="assets/app.css" />
+  </head>
+  <body data-page="search">
+    <main>
+      <section class="hero">
+        <div class="hero-top">
+          <div>
+            <span class="eyebrow">Search</span>
+            <h1>RAG Admin Console</h1>
+            <p class="lead">
+              검색과 진단 기능을 분리한 페이지입니다. 실행 결과는 Search Audit과 Provider History에 반영됩니다.
+            </p>
+          </div>
+          <div class="badge-row">
+            <span class="badge" id="badge-base"></span>
+            <span class="badge" id="badge-api"></span>
+            <span class="badge" id="badge-window"></span>
+            <span class="badge" id="badge-role"></span>
+          </div>
+        </div>
+
+        <nav class="nav-menu"></nav>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Workspace Context</h2>
+              <p>Overview와 동일한 tenant/window를 공유합니다.</p>
+            </div>
+          </div>
+          <div class="dual">
+            <label>
+              Tenant ID
+              <input data-context="tenantId" value="tenant-admin" />
+            </label>
+            <label>
+              Recent Provider Window (ms)
+              <input data-context="recentProviderWindowMillis" type="number" value="60000" />
+            </label>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Search Form</h2>
+              <p>ACL principal 기준 검색과 진단을 실행합니다.</p>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="dual">
+              <label>
+                Principals
+                <input id="search-principals" value="group:admin" />
+              </label>
+              <label>
+                Top K
+                <input id="search-topk" type="number" value="5" />
+              </label>
+            </div>
+            <label>
+              Query
+              <input id="search-query" value="hybrid retrieval" />
+            </label>
+            <label>
+              Metadata Filter (`key=value`)
+              <textarea id="search-filter" placeholder="surface=admin"></textarea>
+            </label>
+            <div class="actions">
+              <button id="btn-search">Run Search</button>
+              <button class="secondary" id="btn-diagnose">Run Diagnostics</button>
+            </div>
+            <div class="notice" id="search-notice"></div>
+          </div>
+        </article>
+
+        <article class="panel full">
+          <div class="panel-header">
+            <div>
+              <h2>Outputs</h2>
+              <p>검색 결과와 진단 결과를 분리해 보여 줍니다.</p>
+            </div>
+          </div>
+          <div class="grid">
+            <div class="stack">
+              <strong>Search</strong>
+              <pre id="output-search">{}</pre>
+            </div>
+            <div class="stack">
+              <strong>Diagnostics</strong>
+              <pre id="output-diagnostics">{}</pre>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      window.RAG_ADMIN_CONFIG = __RAG_ADMIN_CONFIG__;
+    </script>
+    <script src="assets/app.js"></script>
+  </body>
+</html>
