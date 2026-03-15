@@ -1,0 +1,10 @@
+import{A as e,G as t,K as n,M as r,P as i,_ as a,h as o,s}from"../chunks/ekN-yKcC.js";import"../chunks/BMRk7WTg.js";import"../chunks/DfrbH75k.js";import{t as c}from"../chunks/Cffqb-Gd.js";var l=a('<section class="grid"><article class="panel"><div class="panel-header"><div><h2>Bulk Text Ingest</h2><p>문서 배열 JSON을 넣어 여러 문서를 한 번에 색인합니다.</p></div></div> <div class="stack"><label>Tenant ID<input data-context="tenantId" value="tenant-admin"/></label> <label>Documents JSON<textarea id="bulk-ingest-json"></textarea></label> <div class="actions"><button id="btn-bulk-ingest">Run Bulk Text Ingest</button></div></div></article> <article class="panel"><div class="panel-header"><div><h2>Bulk Delete / Patch</h2><p>쉼표 또는 줄바꿈 기준 doc id 목록을 입력합니다.</p></div></div> <div class="stack"><label>Delete Doc IDs<textarea id="bulk-delete-docs">bulk-001</textarea></label> <div class="actions"><button class="secondary" id="btn-bulk-delete">Run Bulk Delete</button></div> <label>Patch Doc IDs<textarea id="bulk-patch-docs">bulk-001</textarea></label> <label>Patch Metadata (`key=value`)<textarea id="bulk-patch-metadata">surface=patched</textarea></label> <div class="actions"><button id="btn-bulk-patch">Run Metadata Patch</button></div> <div class="notice" id="bulk-notice"></div></div></article> <article class="panel full"><div class="panel-header"><div><h2>Output</h2><p>bulk 작업 응답 전문입니다.</p></div></div> <pre id="output-bulk"></pre></article></section>');function u(a){c(a,{title:`Ainsoft RAG Admin Bulk Operations`,page:`bulk-operations`,copy:`Batch workspace for bulk ingest, delete, and metadata patch operations.`,children:(a,c)=>{var u=l(),d=r(u),f=i(r(d),2),p=i(r(f),2),m=i(r(p));e(m),s(m,`[
+  {
+    "docId": "bulk-001",
+    "text": "bulk sample document",
+    "acl": ["group:admin"],
+    "metadata": {
+      "surface": "bulk"
+    }
+  }
+]`),n(p),t(2),n(f),n(d);var h=i(d,4),g=i(r(h),2);g.textContent=`{}`,n(h),n(u),o(a,u)},$$slots:{default:!0}})}export{u as component};

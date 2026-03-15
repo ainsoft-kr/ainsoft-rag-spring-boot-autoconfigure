@@ -218,6 +218,8 @@ h3 {
 
 .content-area {
   display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
   gap: 24px;
   padding: 28px;
 }

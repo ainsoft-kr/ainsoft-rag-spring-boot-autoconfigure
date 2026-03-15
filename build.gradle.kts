@@ -1,9 +1,11 @@
 import org.gradle.api.Project
 import org.gradle.api.publish.PublishingExtension
 import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
+import org.gradle.language.jvm.tasks.ProcessResources
 import org.gradle.plugins.signing.SigningExtension
 import java.net.HttpURLConnection
 import java.net.URI
@@ -67,6 +69,73 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+}
+
+val frontendDir = layout.projectDirectory.dir("frontend")
+val frontendBuildOutput = frontendDir.dir("build")
+val bundledAdminUiDir = layout.projectDirectory.dir("src/main/resources/META-INF/resources/rag-admin")
+val npmExecutable = if (System.getProperty("os.name").lowercase().contains("win")) "npm.cmd" else "npm"
+val skipFrontendBuild = providers.gradleProperty("skipFrontendBuild")
+    .map(String::toBoolean)
+    .orElse(false)
+
+sourceSets {
+    main {
+        resources {
+            if (!skipFrontendBuild.get()) {
+                exclude("META-INF/resources/rag-admin/**")
+            }
+        }
+    }
+}
+
+val frontendNpmInstall = tasks.register<Exec>("frontendNpmInstall") {
+    group = "frontend"
+    description = "Install the rag-admin SvelteKit frontend dependencies."
+    workingDir(frontendDir.asFile)
+    commandLine(npmExecutable, "ci")
+    onlyIf { !skipFrontendBuild.get() }
+    inputs.files(
+        frontendDir.file("package.json"),
+        frontendDir.file("package-lock.json")
+    )
+    outputs.dir(frontendDir.dir("node_modules"))
+}
+
+val buildFrontend = tasks.register<Exec>("buildFrontend") {
+    group = "frontend"
+    description = "Build the rag-admin SvelteKit frontend."
+    dependsOn(frontendNpmInstall)
+    workingDir(frontendDir.asFile)
+    commandLine(npmExecutable, "run", "build")
+    onlyIf { !skipFrontendBuild.get() }
+    inputs.dir(frontendDir.dir("src"))
+    inputs.dir(frontendDir.dir("static"))
+    inputs.files(
+        frontendDir.file("package.json"),
+        frontendDir.file("package-lock.json"),
+        frontendDir.file("svelte.config.js"),
+        frontendDir.file("vite.config.js"),
+        frontendDir.file("jsconfig.json")
+    )
+    outputs.dir(frontendBuildOutput)
+}
+
+tasks.register<Sync>("deployFrontend") {
+    group = "frontend"
+    description = "Copy the built rag-admin frontend into src/main/resources."
+    dependsOn(buildFrontend)
+    into(bundledAdminUiDir)
+    from(frontendBuildOutput)
+}
+
+tasks.named<ProcessResources>("processResources") {
+    if (!skipFrontendBuild.get()) {
+        dependsOn(buildFrontend)
+        from(frontendBuildOutput) {
+            into("META-INF/resources/rag-admin")
+        }
+    }
 }
 
 tasks.named("dokkaHtml").configure {

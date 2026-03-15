@@ -1,0 +1,45 @@
+<script>
+  import AdminPage from '$lib/admin/AdminPage.svelte';
+</script>
+
+<AdminPage
+  title="Ainsoft RAG Admin Access Security"
+  page="access-security"
+  copy="Role-aware access board with feature policies and access audit."
+>
+  <section class="grid">
+    <article class="panel">
+      <div class="panel-header"><div><h2>Session Context</h2><p>현재 role과 token 전달 방식을 표시합니다.</p></div></div>
+      <div class="stack">
+        <label>Access Token<input data-context="accessToken" placeholder="security enabled 시 사용" /></label>
+        <p class="helper">Current Role: <strong id="access-current-role" class="mono">-</strong></p>
+        <p class="helper">Token Header: <strong id="access-token-header" class="mono">-</strong></p>
+        <p class="helper">Token Query Param: <strong id="access-token-query" class="mono">-</strong></p>
+        <div class="actions"><button id="btn-access-refresh">Refresh Access Security</button></div>
+        <div class="notice" id="access-notice"></div>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-header"><div><h2>Feature Roles</h2><p>feature별 허용 role 매핑입니다.</p></div></div>
+      <div id="access-feature-table"></div>
+    </article>
+
+    <article class="panel full">
+      <div class="panel-header"><div><h2>Security Summary</h2><p>허용 role 수, 감사 승인율, 역할-기능 매트릭스를 시각적으로 표시합니다.</p></div></div>
+      <div class="analytic-grid" id="access-analytics"></div>
+      <div id="role-matrix"></div>
+    </article>
+
+    <article class="panel full">
+      <div class="panel-header"><div><h2>Access Audit</h2><p>최근 접근 성공/실패 내역입니다.</p></div></div>
+      <div id="access-audit-table"></div>
+    </article>
+
+    <article class="panel full">
+      <div class="panel-header"><div><h2>Output</h2><p>access/security 응답 전문입니다.</p></div></div>
+      <pre id="output-access-security">{'{}'}</pre>
+    </article>
+  </section>
+</AdminPage>
+
