@@ -7,6 +7,7 @@
 이 모듈의 역할은 단순히 `RagEngine` 빈 하나를 만드는 것에 그치지 않습니다. 실제로는 아래를 함께 담당합니다.
 
 - `rag.*` 설정을 엔진 옵션으로 변환
+- `llm.*` 공통 provider 설정을 해석해 answer/query rewrite/summarizer에 연결
 - chunker, embedding provider, reranker, summarizer, stats cache store 빈 구성
 - provider health auto export lifecycle 등록
 - servlet 기반 운영 UI `/rag-admin` 및 운영 API `/api/rag/admin` 자동 활성화
@@ -22,6 +23,7 @@ implementation("com.ainsoft.rag:ainsoft-rag-spring-boot-autoconfigure:0.1.0")
 
 - `RagAutoConfiguration`
 - `RagProperties`
+- `LlmProperties`
 - 기본 `EmbeddingProvider`, `Chunker`, `RagEngine` 빈 구성
 - stats cache/file cache 빈 구성
 - provider health auto export lifecycle 구성
@@ -51,6 +53,40 @@ implementation("com.ainsoft.rag:ainsoft-rag-spring-boot-autoconfigure:0.1.0")
 - `rag.providerHealthAutoExportPushUrl`
 
 기본값은 heuristic 중심으로 잡혀 있어 외부 provider 없이도 시작 가능하고, 필요해지면 provider 기반 재작성/재랭킹/요약으로 확장할 수 있습니다.
+
+`llm.*`를 추가하면 provider를 이름으로 묶어서 재사용할 수 있습니다.
+
+예시:
+
+```yaml
+llm:
+  defaultProvider: openai
+  providers:
+    openai:
+      kind: openai-compatible
+      baseUrl: https://api.openai.com/v1
+      apiKey: ${OPENAI_API_KEY}
+      model: gpt-4o-mini
+    gemini:
+      kind: gemini
+      baseUrl: https://generativelanguage.googleapis.com/v1beta/models
+      apiKey: ${GEMINI_API_KEY}
+      model: gemini-2.0-flash
+    anthropic:
+      kind: anthropic
+      baseUrl: https://api.anthropic.com/v1
+      apiKey: ${ANTHROPIC_API_KEY}
+      model: claude-3-5-sonnet-latest
+  queryRewrite:
+    provider: openai
+    model: gpt-4o-mini
+  summarizer:
+    provider: openai
+    model: gpt-4o-mini
+```
+
+지원하는 provider kind는 `openai-compatible`, `openai`, `anthropic`, `claude`, `gemini`, `google-gemini`, `vertex`, `vertex-ai`, `vertex-gemini`입니다.
+`gemini`는 Google Generative Language API를, `vertex*`는 Vertex AI Gemini 엔드포인트를 대상으로 둡니다.
 
 예시:
 

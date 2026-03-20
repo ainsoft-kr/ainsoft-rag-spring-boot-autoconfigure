@@ -9,6 +9,7 @@ import com.ainsoft.rag.api.RagComponents
 import com.ainsoft.rag.api.RagConfig
 import com.ainsoft.rag.api.RagEngine
 import com.ainsoft.rag.api.RagOptions
+import com.ainsoft.rag.api.TextGenerationProviderFactory
 import com.ainsoft.rag.api.RerankerOptions
 import com.ainsoft.rag.cache.InMemoryStatsCacheStore
 import com.ainsoft.rag.cache.StatsCacheStore
@@ -34,12 +35,14 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 
 @AutoConfiguration
-@EnableConfigurationProperties(RagProperties::class)
+@EnableConfigurationProperties(RagProperties::class, LlmProperties::class)
 class RagAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
     fun ragConfig(props: RagProperties): RagConfig {
+        val queryRewriteConfig = props.llm.resolveQueryRewrite()
+        val summarizerConfig = props.llm.resolveSummarizer()
         val path = Path.of(props.indexPath)
         path.createDirectories()
         return RagConfig(
@@ -81,22 +84,24 @@ class RagAutoConfiguration {
                     minResultsBeforeSkip = props.correctiveMinResultsBeforeSkip,
                     expandedCandidateMultiplier = props.correctiveExpandedCandidateMultiplier,
                     queryRewriteEnabled = props.queryRewriteEnabled,
-                    queryRewriterType = props.queryRewriterType,
-                    queryRewriteApiBaseUrl = props.queryRewriteApiBaseUrl,
-                    queryRewriteApiKey = props.queryRewriteApiKey,
-                    queryRewriteModel = props.queryRewriteModel,
-                    queryRewriteRequestTimeoutMillis = props.queryRewriteRequestTimeoutMillis
+                    queryRewriterType = if (queryRewriteConfig != null) "openai-compatible" else props.queryRewriterType,
+                    queryRewriteApiBaseUrl = queryRewriteConfig?.baseUrl ?: props.queryRewriteApiBaseUrl,
+                    queryRewriteApiKey = queryRewriteConfig?.apiKey ?: props.queryRewriteApiKey,
+                    queryRewriteModel = queryRewriteConfig?.model ?: props.queryRewriteModel,
+                    queryRewriteRequestTimeoutMillis = queryRewriteConfig?.requestTimeoutMillis
+                        ?: props.queryRewriteRequestTimeoutMillis
                 ),
                 hierarchicalSummaries = HierarchicalSummaryOptions(
                     enabled = props.hierarchicalSummariesEnabled,
                     maxSectionSummaries = props.hierarchicalMaxSectionSummaries,
                     maxSummaryChars = props.hierarchicalMaxSummaryChars,
                     targetChunksPerSection = props.hierarchicalTargetChunksPerSection,
-                    summarizerType = props.summarizerType,
-                    summarizerApiBaseUrl = props.summarizerApiBaseUrl,
-                    summarizerApiKey = props.summarizerApiKey,
-                    summarizerModel = props.summarizerModel,
-                    summarizerRequestTimeoutMillis = props.summarizerRequestTimeoutMillis
+                    summarizerType = if (summarizerConfig != null) "openai-compatible" else props.summarizerType,
+                    summarizerApiBaseUrl = summarizerConfig?.baseUrl ?: props.summarizerApiBaseUrl,
+                    summarizerApiKey = summarizerConfig?.apiKey ?: props.summarizerApiKey,
+                    summarizerModel = summarizerConfig?.model ?: props.summarizerModel,
+                    summarizerRequestTimeoutMillis = summarizerConfig?.requestTimeoutMillis
+                        ?: props.summarizerRequestTimeoutMillis
                 )
             )
         )
@@ -104,11 +109,27 @@ class RagAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    fun textGenerationProviderFactory(): TextGenerationProviderFactory = TextGenerationProviderFactory { config ->
+        when (config.kind.trim().lowercase()) {
+            "openai", "openai-compatible" -> OpenAiCompatibleTextGenerationProvider(config)
+            "anthropic", "claude" -> AnthropicTextGenerationProvider(config)
+            "gemini", "google-gemini" -> GoogleTextGenerationProvider(config, GoogleTextGenerationProvider.AuthMode.API_KEY_QUERY)
+            "vertex", "vertex-ai", "vertex-gemini" -> GoogleTextGenerationProvider(config, GoogleTextGenerationProvider.AuthMode.BEARER_HEADER)
+            else -> error(
+                "Unsupported LLM provider kind='${config.kind}'. Supported: openai-compatible, anthropic, gemini, vertex"
+            )
+        }
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     fun embeddingProvider(props: RagProperties): EmbeddingProvider {
+        val llmEmbedding = props.llm.resolveEmbedding()
         return when (props.embeddingProvider.trim().lowercase()) {
             "hash" -> HashEmbeddingProvider(props.embeddingDimensions)
             "openai" -> {
                 val apiKey = props.openAiApiKey?.takeIf { it.isNotBlank() }
+                    ?: llmEmbedding?.apiKey
                     ?: System.getenv("OPENAI_API_KEY")?.takeIf { it.isNotBlank() }
                     ?: error(
                         "OpenAI embedding provider requires rag.openAiApiKey or OPENAI_API_KEY env variable"
@@ -116,9 +137,9 @@ class RagAutoConfiguration {
 
                 OpenAiEmbeddingProvider(
                     apiKey = apiKey,
-                    model = props.openAiModel,
+                    model = llmEmbedding?.model ?: props.openAiModel,
                     dimensions = props.embeddingDimensions,
-                    baseUrl = props.openAiBaseUrl
+                    baseUrl = llmEmbedding?.baseUrl ?: props.openAiBaseUrl
                 )
             }
 

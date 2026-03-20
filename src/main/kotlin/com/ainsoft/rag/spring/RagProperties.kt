@@ -90,6 +90,7 @@ data class RagProperties(
     val providerHealthAutoExportPushHmacSecret: String? = null,
     val providerHealthAutoExportPushHmacHeaderName: String = "X-Rag-Signature",
     val providerHealthAutoExportPushTimestampHeaderName: String = "X-Rag-Timestamp",
+    val llm: LlmProperties = LlmProperties(),
     val chunkerType: String = "basic",
     val basicMaxChars: Int = 1800,
     val basicOverlapChars: Int = 200,
