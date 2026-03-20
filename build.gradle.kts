@@ -3,6 +3,7 @@ import org.gradle.api.publish.PublishingExtension
 import org.gradle.api.publish.maven.MavenPublication
 import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Sync
+import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.gradle.language.jvm.tasks.ProcessResources
@@ -11,6 +12,7 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.Base64
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 fun Project.propertyOrEnv(propertyName: String, envName: String): String? =
     (findProperty(propertyName) as String?)?.takeIf { it.isNotBlank() }
@@ -36,7 +38,7 @@ repositories {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(24)
 }
 
 dependencies {
@@ -48,23 +50,28 @@ dependencies {
     api("com.ainsoft.rag:stats-cache-file:$engineVersion")
     runtimeOnly("com.ainsoft.rag:reranker-onnx:$engineVersion")
 
-    api("org.springframework.boot:spring-boot-autoconfigure:3.3.2")
-    compileOnly("org.springframework.boot:spring-boot-starter-web:3.3.2")
+    api("org.springframework.boot:spring-boot-autoconfigure:4.0.4")
+    compileOnly("org.springframework.boot:spring-boot-starter-web:4.0.4")
     implementation("org.apache.lucene:lucene-core:10.3.2")
     implementation("org.apache.lucene:lucene-queryparser:10.3.2")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")
 
-    kapt("org.springframework.boot:spring-boot-configuration-processor:3.3.2")
+    kapt("org.springframework.boot:spring-boot-configuration-processor:4.0.4")
 
     testImplementation(kotlin("test"))
-    testImplementation("org.springframework.boot:spring-boot-starter-test:3.3.2")
-    testImplementation("org.springframework.boot:spring-boot-starter-web:3.3.2")
+    testImplementation("org.springframework.boot:spring-boot-starter-test:4.0.4")
+    testImplementation("org.springframework.boot:spring-boot-starter-web:4.0.4")
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_24)
         freeCompilerArgs.add("-Xjsr305=strict")
     }
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    options.release.set(24)
 }
 
 tasks.withType<Test>().configureEach {
