@@ -12,6 +12,10 @@
       <div class="panel-header"><div><h2>Bulk Text Ingest</h2><p>문서 배열 JSON을 넣어 여러 문서를 한 번에 색인합니다.</p></div></div>
       <div class="stack">
         <label>Tenant ID<input data-context="tenantId" value="tenant-admin" /></label>
+        <div class="dual">
+          <label>Incremental Ingest<input id="bulk-ingest-incremental" type="checkbox" checked /></label>
+          <div></div>
+        </div>
         <label>Documents JSON<textarea id="bulk-ingest-json">{`[
   {
     "docId": "bulk-001",
@@ -23,6 +27,15 @@
   }
 ]`}</textarea></label>
         <div class="actions"><button id="btn-bulk-ingest">Run Bulk Text Ingest</button></div>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-header"><div><h2>How It Works</h2><p>bulk 작업은 문서 단위로 처리되어 ingest, delete, patch를 분리해서 추적합니다.</p></div></div>
+      <div class="feature-grid">
+        <div class="feature-card"><h3>Incremental</h3><p>문서 배열도 같은 tenant와 docId 기준으로 중복을 건너뜁니다.</p></div>
+        <div class="feature-card"><h3>Delete safety</h3><p>삭제는 개별 docId를 기준으로 수행되고 캐시도 같이 정리됩니다.</p></div>
+        <div class="feature-card"><h3>Patch flow</h3><p>metadata patch는 기존 문서를 읽어 다시 reindex하는 방식으로 동작합니다.</p></div>
       </div>
     </article>
 
@@ -41,6 +54,43 @@
     <article class="panel full">
       <div class="panel-header"><div><h2>Output</h2><p>bulk 작업 응답 전문입니다.</p></div></div>
       <pre id="output-bulk">{'{}'}</pre>
+    </article>
+
+    <article class="panel full">
+      <div class="panel-header"><div><h2>Run Summary</h2><p>bulk ingest와 후속 작업의 상태를 모아 봅니다.</p></div></div>
+      <div id="bulk-summary"></div>
+    </article>
+
+    <article class="panel full">
+      <div class="panel-header"><div><h2>Progress Trace</h2><p>배치 ingest와 결과 처리 흐름을 단계별로 보여줍니다.</p></div></div>
+      <div id="bulk-progress-log"></div>
+    </article>
+
+    <article class="panel full">
+      <div class="panel-header"><div><h2>Result Cards</h2><p>bulk ingest 결과를 문서별 카드로 표시합니다.</p></div></div>
+      <div class="tab-bar">
+        <button class="tab-button active" id="bulk-tab-all" type="button">All Results</button>
+        <button class="tab-button" id="bulk-tab-changed" type="button">Changed Only <span class="tab-count" id="bulk-tab-changed-count" hidden>0</span></button>
+      </div>
+      <div class="stack">
+        <label>Result Filter
+          <select id="bulk-result-filter">
+            <option value="all">All</option>
+            <option value="ingested">Ingested</option>
+            <option value="changed">Changed</option>
+            <option value="skipped">Skipped</option>
+            <option value="deleted">Deleted</option>
+            <option value="patched">Patched</option>
+            <option value="failed">Failed</option>
+          </select>
+        </label>
+      </div>
+      <div class="tab-panel" id="bulk-result-panel-all">
+        <div id="bulk-result-cards"></div>
+      </div>
+      <div class="tab-panel" id="bulk-result-panel-changed" hidden>
+        <div id="bulk-result-cards-changed"></div>
+      </div>
     </article>
   </section>
 </AdminPage>

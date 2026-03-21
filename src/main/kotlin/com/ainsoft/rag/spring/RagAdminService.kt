@@ -18,10 +18,12 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import java.nio.charset.Charset
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
 import java.util.ArrayDeque
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.listDirectoryEntries
@@ -42,10 +44,12 @@ class RagAdminService(
     private val objectMapper = jacksonObjectMapper()
     private val plainTextParser = PlainTextParser()
     private val tikaDocumentParser = TikaDocumentParser()
+    private val webCrawler = RagAdminWebCrawler()
     private val searchAudits = ArrayDeque<RagAdminSearchAuditEntry>()
     private val jobHistory = ArrayDeque<RagAdminJobHistoryEntry>()
     private val accessAudits = ArrayDeque<RagAdminAccessAuditEntry>()
     private val providerHistory = ArrayDeque<RagAdminProviderHistoryEntry>()
+    private val ingestSnapshotCache = ConcurrentHashMap<String, IngestSnapshot>()
 
     fun recordAccess(
         path: String,
@@ -299,6 +303,7 @@ class RagAdminService(
 
     fun deleteDocument(tenantId: String, docId: String): RagAdminOperationResponse {
         val deleted = engine.deleteDocument(tenantId, docId)
+        clearIngestSnapshotCache(tenantId, docId)
         recordProviderSnapshot("delete-document")
         return RagAdminOperationResponse(
             operation = "deleteDocument",
@@ -337,6 +342,19 @@ class RagAdminService(
                 pageMarkers = parsed.pageMarkers
             )
         )
+        rememberIngestSnapshot(
+            tenantId = tenantId,
+            docId = docId,
+            contentHash = documentContentHash(
+                normalizedText = parsed.normalizedText,
+                metadata = effectiveMetadata,
+                acl = effectiveAcl,
+                sourceUri = parsed.sourceUri ?: effectiveSourceUri,
+                page = parsed.page,
+                pageMarkers = parsed.pageMarkers
+            ),
+            preview = documentPreview(parsed.normalizedText)
+        )
         recordProviderSnapshot("reindex-document")
         return RagAdminOperationResponse(
             operation = "reindexDocument",
@@ -345,6 +363,219 @@ class RagAdminService(
             affectedCount = 1,
             tenantId = tenantId
         )
+    }
+
+    fun webIngest(
+        role: String?,
+        request: RagAdminWebIngestRequest,
+        progressSink: ((RagAdminWebIngestProgressEvent) -> Unit)? = null,
+        isCancelled: () -> Boolean = { false }
+    ): RagAdminWebIngestResponse {
+        val normalizedTenantId = normalizeIdentifier(request.tenantId, "tenantId")
+        require(request.urls.isNotEmpty()) { "urls must not be empty" }
+        require(request.acl.isNotEmpty()) { "acl must not be empty" }
+        require(request.maxPages > 0) { "maxPages must be greater than zero" }
+        require(request.maxDepth >= 0) { "maxDepth must not be negative" }
+
+        val normalizedUrls = request.urls.map { normalizeWebUrl(it) }
+        val jobId = startJob(
+            jobType = "web-ingest",
+            tenantId = normalizedTenantId,
+            role = role,
+            description = "web ingest for ${normalizedUrls.size} urls",
+            payload = mapOf(
+                "tenantId" to normalizedTenantId,
+                "urls" to normalizedUrls,
+                "allowedDomains" to request.allowedDomains,
+                "maxPages" to request.maxPages,
+                "maxDepth" to request.maxDepth,
+                "sameHostOnly" to request.sameHostOnly,
+                "incrementalIngest" to request.incrementalIngest
+            )
+        )
+        try {
+            val resolvedProfile = properties.resolveSourceLoadProfile(null)
+            val crawl = webCrawler.crawl(
+                seedUrls = normalizedUrls,
+                allowedDomains = request.allowedDomains,
+                maxPages = request.maxPages,
+                maxDepth = request.maxDepth,
+                sameHostOnly = request.sameHostOnly,
+                charset = Charset.forName(request.charset),
+                timeout = Duration.ofMillis(resolvedProfile.timeoutMillis ?: properties.sourceLoadTimeoutMillis),
+                configuredAllowedHosts = resolvedProfile.allowHosts.orEmpty().toSet(),
+                authHeaders = resolvedProfile.authHeaders.orEmpty(),
+                insecureSkipTlsVerify = resolvedProfile.insecureSkipTlsVerify ?: false,
+                customCaCertPath = resolvedProfile.customCaCertPath,
+                respectRobotsTxt = request.respectRobotsTxt,
+                userAgent = request.userAgent,
+                progressSink = progressSink,
+                isCancelled = isCancelled
+            )
+
+            val results = mutableListOf<RagAdminWebIngestPageResponse>()
+            val progress = crawl.progress.toMutableList()
+            val failures = crawl.failures.toMutableList()
+            var changedPages = 0
+            var skippedPages = 0
+
+            fun emitProgress(event: RagAdminWebIngestProgressEvent) {
+                progress += event
+                progressSink?.invoke(event)
+            }
+
+            crawl.pages.forEachIndexed { index, page ->
+                if (isCancelled()) {
+                    throw WebIngestCancelledException()
+                }
+                try {
+                    val normalizedDocId = webDocIdFromUrl(page.url)
+                    val normalizedText = buildWebNormalizedText(page)
+                    val contentHash = webContentHash(page)
+                    val preview = webPreviewText(page.title, page.description, normalizedText)
+                    val metadata = buildWebMetadata(request.metadata, page) + mapOf(
+                        "crawl.contentHash" to contentHash,
+                        "rag.contentHash" to contentHash,
+                        "rag.preview" to preview
+                    )
+                    val existingSnapshot = if (request.incrementalIngest) {
+                        resolveIngestSnapshot(normalizedTenantId, normalizedDocId)
+                    } else {
+                        null
+                    }
+                    if (request.incrementalIngest && existingSnapshot != null && existingSnapshot.contentHash == contentHash) {
+                        skippedPages += 1
+                        results += RagAdminWebIngestPageResponse(
+                            url = page.url,
+                            docId = normalizedDocId,
+                            title = page.title,
+                            depth = page.depth,
+                            source = page.source,
+                            status = "skipped",
+                            message = "already ingested"
+                        )
+                        emitProgress(
+                            RagAdminWebIngestProgressEvent(
+                                phase = "skip-existing",
+                                message = "Skipped unchanged page ${index + 1} of ${crawl.pages.size}",
+                                url = page.url,
+                                depth = page.depth,
+                                current = index + 1,
+                                total = crawl.pages.size
+                            )
+                        )
+                        return@forEachIndexed
+                    }
+                    val wasChanged = request.incrementalIngest && existingSnapshot != null && existingSnapshot.contentHash != contentHash
+                    val previousPreview = if (wasChanged) existingSnapshot.preview else null
+                    val currentPreview = preview
+                    val changeSummary = when {
+                        wasChanged && previousPreview != null -> "content changed"
+                        wasChanged -> "existing content changed"
+                        else -> null
+                    }
+                    engine.upsert(
+                        UpsertDocumentRequest(
+                            tenantId = normalizedTenantId,
+                            docId = normalizedDocId,
+                            normalizedText = normalizedText,
+                            metadata = metadata,
+                            acl = Acl(request.acl),
+                            sourceUri = page.url
+                        )
+                    )
+                    rememberIngestSnapshot(normalizedTenantId, normalizedDocId, contentHash, currentPreview)
+                    if (wasChanged) {
+                        changedPages += 1
+                    }
+                    results += RagAdminWebIngestPageResponse(
+                        url = page.url,
+                        docId = normalizedDocId,
+                        title = page.title,
+                        depth = page.depth,
+                        source = page.source,
+                        status = if (wasChanged) "changed" else "ingested",
+                        previousPreview = previousPreview,
+                        currentPreview = currentPreview,
+                        changeSummary = changeSummary
+                    )
+                    emitProgress(
+                        RagAdminWebIngestProgressEvent(
+                            phase = if (wasChanged) "changed" else "ingest",
+                            message = if (wasChanged) {
+                                "Changed page ${index + 1} of ${crawl.pages.size}"
+                            } else {
+                                "Ingested page ${index + 1} of ${crawl.pages.size}"
+                            },
+                            url = page.url,
+                            depth = page.depth,
+                            current = index + 1,
+                            total = crawl.pages.size
+                        )
+                    )
+                } catch (error: Exception) {
+                    if (isCancelled()) {
+                        throw WebIngestCancelledException()
+                    }
+                    failures += RagAdminWebIngestFailure(
+                        url = page.url,
+                        depth = page.depth,
+                        message = error.message ?: "web ingest failed"
+                    )
+                    results += RagAdminWebIngestPageResponse(
+                        url = page.url,
+                        docId = webDocIdFromUrl(page.url),
+                        title = page.title,
+                        depth = page.depth,
+                        source = page.source,
+                        status = "failed",
+                        message = error.message ?: "web ingest failed"
+                    )
+                    emitProgress(
+                        RagAdminWebIngestProgressEvent(
+                            phase = "ingest-failed",
+                            message = error.message ?: "web ingest failed",
+                            url = page.url,
+                            depth = page.depth,
+                            current = index + 1,
+                            total = crawl.pages.size
+                        )
+                    )
+                }
+            }
+
+            val status = when {
+                results.isNotEmpty() && results.all { it.status == "skipped" } && failures.isEmpty() -> "skipped"
+                results.any { it.status == "ingested" } && results.any { it.status == "changed" } && failures.isEmpty() -> "partial"
+                results.any { it.status == "changed" } && failures.isEmpty() && skippedPages > 0 -> "partial"
+                results.any { it.status == "changed" } && failures.isEmpty() && skippedPages == 0 && results.all { it.status == "changed" } -> "changed"
+                results.any { it.status == "ingested" } && failures.isEmpty() && skippedPages > 0 -> "partial"
+                failures.isEmpty() && results.any { it.status == "ingested" } -> "ingested"
+                results.any { it.status == "ingested" || it.status == "changed" || it.status == "skipped" } -> "partial"
+                else -> "failed"
+            }
+            completeJob(
+                jobId,
+                if (status == "failed") "FAILED" else "SUCCESS",
+                "web ingest completed with ${results.count { it.status == "ingested" }} pages, ${changedPages} changed, ${skippedPages} skipped"
+            )
+            recordProviderSnapshot("web-ingest")
+            return RagAdminWebIngestResponse(
+                status = status,
+                tenantId = normalizedTenantId,
+                urls = normalizedUrls,
+                crawledPages = crawl.pages.size,
+                ingestedPages = results.count { it.status == "ingested" },
+                changedPages = changedPages,
+                skippedPages = skippedPages,
+                results = results,
+                progress = progress,
+                failures = failures
+            )
+        } catch (error: WebIngestCancelledException) {
+            completeJob(jobId, "CANCELLED", "web ingest cancelled")
+            throw error
+        }
     }
 
     fun sourcePreview(
@@ -399,6 +630,139 @@ class RagAdminService(
         )
     }
 
+    private fun resolveIngestSnapshot(tenantId: String, docId: String): IngestSnapshot? {
+        val key = webIngestCacheKey(tenantId, docId)
+        ingestSnapshotCache[key]?.let { return it }
+        val fromIndex = existingIngestSnapshot(tenantId, docId)
+        if (fromIndex != null) {
+            ingestSnapshotCache[key] = fromIndex
+        }
+        return fromIndex
+    }
+
+    private fun existingIngestSnapshot(tenantId: String, docId: String): IngestSnapshot? =
+        runCatching {
+            val detail = getDocumentDetail(tenantId, docId)
+            val contentHash = detail.metadata["rag.contentHash"]
+                ?.takeIf { it.isNotBlank() }
+                ?: detail.metadata["crawl.contentHash"]?.takeIf { it.isNotBlank() }
+                ?: return@runCatching null
+            val preview = detail.metadata["rag.preview"]?.takeIf { it.isNotBlank() } ?: when {
+                detail.metadata.containsKey("crawl.title") || detail.metadata.containsKey("crawl.description") ->
+                    webPreviewText(
+                        detail.metadata["crawl.title"],
+                        detail.metadata["crawl.description"],
+                        detail.chunks.joinToString("\n\n") { it.text.orEmpty() }
+                    )
+                else -> documentPreview(detail.chunks.joinToString("\n\n") { it.text.orEmpty() })
+            }
+            IngestSnapshot(
+                contentHash = contentHash,
+                preview = preview
+            )
+        }.getOrNull()
+
+    private fun rememberIngestSnapshot(tenantId: String, docId: String, contentHash: String, preview: String) {
+        ingestSnapshotCache[webIngestCacheKey(tenantId, docId)] = IngestSnapshot(contentHash, preview)
+    }
+
+    private fun clearIngestSnapshotCache(tenantId: String) {
+        val prefix = "$tenantId|"
+        ingestSnapshotCache.keys.removeIf { it.startsWith(prefix) }
+    }
+
+    private fun clearIngestSnapshotCache(tenantId: String, docId: String) {
+        ingestSnapshotCache.remove(webIngestCacheKey(tenantId, docId))
+    }
+
+    private fun webIngestCacheKey(tenantId: String, docId: String): String = "$tenantId|$docId"
+
+    private fun documentContentHash(
+        normalizedText: String,
+        metadata: Map<String, String>,
+        acl: List<String>,
+        sourceUri: String?,
+        page: Int?,
+        pageMarkers: List<PageMarker>
+    ): String {
+        val canonical = listOf(
+            normalizedText.trim(),
+            metadata.toSortedMap().entries.joinToString("|") { (key, value) -> "$key=$value" },
+            acl.sorted().joinToString("|"),
+            sourceUri.orEmpty().trim(),
+            page?.toString().orEmpty(),
+            pageMarkers.joinToString("|") { "${it.page}:${it.offsetStart}:${it.offsetEnd}" }
+        ).joinToString("\u0000")
+        return digest(canonical)
+    }
+
+    private fun documentPreview(text: String, maxChars: Int = 320): String {
+        val normalized = text.trim().replace(Regex("\\s+"), " ")
+        return if (normalized.length <= maxChars) normalized else normalized.take(maxChars - 3).trimEnd() + "..."
+    }
+
+    private fun digest(text: String): String {
+        val bytes = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    fun ingestDocument(
+        tenantId: String,
+        docId: String,
+        request: UpsertDocumentRequest,
+        incrementalIngest: Boolean = true
+    ): RagAdminIngestOutcome {
+        val normalizedTenantId = normalizeIdentifier(tenantId, "tenantId")
+        val normalizedDocId = normalizeIdentifier(docId, "docId")
+        val contentHash = documentContentHash(
+            normalizedText = request.normalizedText,
+            metadata = request.metadata,
+            acl = request.acl.allow,
+            sourceUri = request.sourceUri,
+            page = request.page,
+            pageMarkers = request.pageMarkers.orEmpty()
+        )
+        val preview = documentPreview(request.normalizedText)
+        val existingSnapshot = if (incrementalIngest) resolveIngestSnapshot(normalizedTenantId, normalizedDocId) else null
+        if (incrementalIngest && existingSnapshot != null && existingSnapshot.contentHash == contentHash) {
+            return RagAdminIngestOutcome(
+                status = "skipped",
+                message = "already ingested"
+            )
+        }
+        val wasChanged = incrementalIngest && existingSnapshot != null && existingSnapshot.contentHash != contentHash
+        engine.upsert(
+            UpsertDocumentRequest(
+                tenantId = normalizedTenantId,
+                docId = normalizedDocId,
+                normalizedText = request.normalizedText,
+                metadata = request.metadata + mapOf(
+                    "rag.contentHash" to contentHash,
+                    "rag.preview" to preview
+                ),
+                acl = request.acl,
+                sourceUri = request.sourceUri,
+                page = request.page,
+                pageMarkers = request.pageMarkers
+            )
+        )
+        rememberIngestSnapshot(normalizedTenantId, normalizedDocId, contentHash, preview)
+        return RagAdminIngestOutcome(
+            status = if (wasChanged) "changed" else "ingested",
+            message = when {
+                wasChanged -> "content changed"
+                else -> "ingested"
+            },
+            previousPreview = if (wasChanged) existingSnapshot.preview else null,
+            currentPreview = preview,
+            changeSummary = when {
+                wasChanged && existingSnapshot.preview.isNotBlank() -> "content changed"
+                wasChanged -> "existing content changed"
+                else -> null
+            }
+        )
+    }
+
     fun listTenants(): RagAdminTenantListResponse = withReader { reader ->
         val tenants = linkedMapOf<String, MutableTenantAggregate>()
         iterateDocuments(reader, null) { luceneDocId, stored, effectiveTenantId ->
@@ -440,6 +804,7 @@ class RagAdminService(
 
     fun deleteTenant(tenantId: String): RagAdminOperationResponse {
         val deleted = engine.deleteTenant(tenantId)
+        clearIngestSnapshotCache(tenantId)
         recordProviderSnapshot("delete-tenant")
         return RagAdminOperationResponse(
             operation = "deleteTenant",
@@ -496,23 +861,40 @@ class RagAdminService(
     fun bulkTextIngest(request: RagAdminBulkTextIngestRequest): RagAdminBulkOperationResponse {
         val results = request.documents.map { document ->
             runCatching {
-                engine.upsert(
-                    UpsertDocumentRequest(
-                        tenantId = request.tenantId,
-                        docId = document.docId,
-                        normalizedText = document.text,
-                        metadata = document.metadata,
-                        acl = Acl(document.acl),
-                        sourceUri = document.sourceUri,
-                        page = document.page,
-                        pageMarkers = document.pageMarkers.orEmpty().map {
-                            PageMarker(it.page, it.offsetStart, it.offsetEnd)
-                        }
-                    )
+                val upsertRequest = UpsertDocumentRequest(
+                    tenantId = request.tenantId,
+                    docId = document.docId,
+                    normalizedText = document.text,
+                    metadata = document.metadata,
+                    acl = Acl(document.acl),
+                    sourceUri = document.sourceUri,
+                    page = document.page,
+                    pageMarkers = document.pageMarkers.orEmpty().map {
+                        PageMarker(it.page, it.offsetStart, it.offsetEnd)
+                    }
                 )
-                RagAdminBulkItemResult(document.docId, true, "ingested")
+                val ingestResult = ingestDocument(
+                    tenantId = request.tenantId,
+                    docId = document.docId,
+                    request = upsertRequest,
+                    incrementalIngest = request.incrementalIngest
+                )
+                RagAdminBulkItemResult(
+                    docId = document.docId,
+                    success = true,
+                    message = ingestResult.message ?: ingestResult.status,
+                    status = ingestResult.status,
+                    previousPreview = ingestResult.previousPreview,
+                    currentPreview = ingestResult.currentPreview,
+                    changeSummary = ingestResult.changeSummary
+                )
             }.getOrElse { error ->
-                RagAdminBulkItemResult(document.docId, false, error.message ?: "bulk ingest failed")
+                RagAdminBulkItemResult(
+                    docId = document.docId,
+                    success = false,
+                    message = error.message ?: "bulk ingest failed",
+                    status = "failed"
+                )
             }
         }
         recordProviderSnapshot("bulk-text-ingest")
@@ -528,9 +910,10 @@ class RagAdminService(
         val results = request.docIds.map { docId ->
             runCatching {
                 val deleted = engine.deleteDocument(request.tenantId, docId)
-                RagAdminBulkItemResult(docId, true, "deleted $deleted chunks")
+                clearIngestSnapshotCache(request.tenantId, docId)
+                RagAdminBulkItemResult(docId, true, "deleted $deleted chunks", "deleted")
             }.getOrElse { error ->
-                RagAdminBulkItemResult(docId, false, error.message ?: "bulk delete failed")
+                RagAdminBulkItemResult(docId, false, error.message ?: "bulk delete failed", "failed")
             }
         }
         recordProviderSnapshot("bulk-delete")
@@ -555,9 +938,9 @@ class RagAdminService(
                         sourceUri = detail.sourceUris.firstOrNull()
                     )
                 )
-                RagAdminBulkItemResult(docId, response.success, response.message)
+                RagAdminBulkItemResult(docId, response.success, response.message, if (response.success) "patched" else "failed")
             }.getOrElse { error ->
-                RagAdminBulkItemResult(docId, false, error.message ?: "metadata patch failed")
+                RagAdminBulkItemResult(docId, false, error.message ?: "metadata patch failed", "failed")
             }
         }
         return RagAdminBulkOperationResponse(
@@ -601,6 +984,16 @@ class RagAdminService(
             ) ?: error("unable to load sourceUri '$sourceUri'")
             plainTextParser.parseText(text, sourceUri = normalizedSource)
         }
+    }
+
+    private fun normalizeIdentifier(raw: String, fieldName: String): String {
+        val normalized = raw.trim()
+            .replace(Regex("\\s+"), "-")
+            .replace(Regex("[^A-Za-z0-9._:-]"), "-")
+            .replace(Regex("-{2,}"), "-")
+            .trim('-')
+        require(normalized.isNotBlank()) { "$fieldName must not be blank after normalization" }
+        return normalized
     }
 
     private fun listSnapshots(): List<RagAdminSnapshotSummary> {
@@ -745,7 +1138,20 @@ class RagAdminService(
         var chunkCount: Int = 0,
         var lastUpdatedEpochMillis: Long = 0L
     )
+
+    private data class IngestSnapshot(
+        val contentHash: String,
+        val preview: String
+    )
 }
+
+data class RagAdminIngestOutcome(
+    val status: String,
+    val message: String? = null,
+    val previousPreview: String? = null,
+    val currentPreview: String? = null,
+    val changeSummary: String? = null
+)
 
 data class RagAdminDocumentListResponse(
     val totalCount: Int,
@@ -927,7 +1333,8 @@ data class RagAdminConfigInspectorResponse(
 
 data class RagAdminBulkTextIngestRequest(
     val tenantId: String,
-    val documents: List<RagAdminBulkTextDocument>
+    val documents: List<RagAdminBulkTextDocument>,
+    val incrementalIngest: Boolean = true
 )
 
 data class RagAdminBulkTextDocument(
@@ -954,7 +1361,11 @@ data class RagAdminBulkMetadataPatchRequest(
 data class RagAdminBulkItemResult(
     val docId: String,
     val success: Boolean,
-    val message: String
+    val message: String,
+    val status: String? = null,
+    val previousPreview: String? = null,
+    val currentPreview: String? = null,
+    val changeSummary: String? = null
 )
 
 data class RagAdminBulkOperationResponse(

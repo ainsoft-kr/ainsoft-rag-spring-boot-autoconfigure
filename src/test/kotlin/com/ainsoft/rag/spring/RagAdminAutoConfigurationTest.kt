@@ -67,6 +67,8 @@ class RagAdminAutoConfigurationTest {
             val controller = context.getBean(RagAdminUiController::class.java)
             val html = controller.page(MockHttpServletRequest(), "documents")
             assertTrue(html.contains("Browse Filters"))
+            val webIngestHtml = controller.page(MockHttpServletRequest(), "web-ingest")
+            assertTrue(webIngestHtml.contains("Crawl Sheet"))
         }
     }
 }

@@ -220,36 +220,36 @@ h3 {
   display: grid;
   align-content: start;
   grid-auto-rows: max-content;
-  gap: 24px;
-  padding: 28px;
+  gap: 16px;
+  padding: 18px 20px;
 }
 
 .topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px 18px;
-  border-radius: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px 16px;
+  padding: 10px 14px;
+  border-radius: 16px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(6px);
 }
 
 .topbar-copy {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .topbar-label {
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
 .topbar-title {
-  font-size: 1rem;
+  font-size: 0.92rem;
   font-weight: 800;
   letter-spacing: -0.02em;
 }
@@ -257,19 +257,20 @@ h3 {
 .topbar-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
 .topbar-pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
+  gap: 6px;
+  padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--muted-strong);
-  font-size: 0.84rem;
+  font-size: 0.8rem;
   font-weight: 700;
 }
 
@@ -764,6 +765,35 @@ tbody tr:hover {
   background: linear-gradient(180deg, #ffffff, #f7faff);
 }
 
+.data-card.status-changed {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: linear-gradient(180deg, #fff8e7, #fffdf7);
+  box-shadow: 0 12px 24px rgba(245, 158, 11, 0.08);
+}
+
+.data-card.status-skipped {
+  opacity: 0.76;
+}
+
+.data-card.status-failed {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: linear-gradient(180deg, #fff5f5, #fffdfd);
+}
+
+.data-card.status-ingested {
+  border-color: rgba(16, 185, 129, 0.22);
+}
+
+.data-card.status-deleted {
+  border-color: rgba(59, 130, 246, 0.28);
+  background: linear-gradient(180deg, #f6fbff, #ffffff);
+}
+
+.data-card.status-patched {
+  border-color: rgba(14, 165, 233, 0.26);
+  background: linear-gradient(180deg, #f0f9ff, #ffffff);
+}
+
 .data-card-head {
   display: flex;
   justify-content: space-between;
@@ -785,6 +815,51 @@ tbody tr:hover {
   color: var(--muted-strong);
   line-height: 1.55;
   font-size: 0.92rem;
+}
+
+.diff-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.diff-line {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+}
+
+.diff-line span {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.diff-line pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.diff-old {
+  background: #fffaf1;
+}
+
+.diff-new {
+  background: #f0fdf4;
+}
+
+.diff-summary {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #b45309;
 }
 
 .chip-row {
@@ -1061,6 +1136,14 @@ tbody tr:hover {
   .content-area,
   .sidebar {
     padding: 18px;
+  }
+
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar-meta {
+    justify-content: flex-start;
   }
 
   .page-header,

@@ -164,6 +164,7 @@ rag:
 - search
 - text-ingest
 - file-ingest
+- web-ingest
 - documents
 - tenants
 - provider-history
@@ -199,6 +200,7 @@ rag:
         search: [ADMIN, OPS, AUDITOR]
         text-ingest: [ADMIN, OPS]
         file-ingest: [ADMIN, OPS]
+        web-ingest: [ADMIN, OPS]
         documents: [ADMIN, OPS, AUDITOR]
         tenants: [ADMIN, OPS]
         provider-history: [ADMIN, OPS, AUDITOR]
@@ -213,7 +215,7 @@ rag:
 
 자동설정이 등록하는 운영 API는 단순 stats 조회를 넘어서 실제 관리 작업을 수행하도록 설계돼 있습니다.
 
-- ingest / file upload
+- ingest / file upload / web crawl ingest
 - search / diagnose-search
 - stats / provider-health
 - documents list / detail / delete / reindex / source-preview

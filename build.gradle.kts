@@ -54,6 +54,7 @@ dependencies {
     compileOnly("org.springframework.boot:spring-boot-starter-web:4.0.4")
     implementation("org.apache.lucene:lucene-core:10.3.2")
     implementation("org.apache.lucene:lucene-queryparser:10.3.2")
+    implementation("com.fleeksoft.ksoup:ksoup:0.2.6")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")
 
     kapt("org.springframework.boot:spring-boot-configuration-processor:4.0.4")

@@ -26,6 +26,7 @@ class RagAdminUiController(
         "search" to "search",
         "text-ingest" to "text-ingest",
         "file-ingest" to "file-ingest",
+        "web-ingest" to "web-ingest",
         "documents" to "documents",
         "tenants" to "tenants",
         "provider-history" to "provider-history",

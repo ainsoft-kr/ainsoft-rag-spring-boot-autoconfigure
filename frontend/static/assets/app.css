@@ -765,6 +765,35 @@ tbody tr:hover {
   background: linear-gradient(180deg, #ffffff, #f7faff);
 }
 
+.data-card.status-changed {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: linear-gradient(180deg, #fff8e7, #fffdf7);
+  box-shadow: 0 12px 24px rgba(245, 158, 11, 0.08);
+}
+
+.data-card.status-skipped {
+  opacity: 0.76;
+}
+
+.data-card.status-failed {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: linear-gradient(180deg, #fff5f5, #fffdfd);
+}
+
+.data-card.status-ingested {
+  border-color: rgba(16, 185, 129, 0.22);
+}
+
+.data-card.status-deleted {
+  border-color: rgba(59, 130, 246, 0.28);
+  background: linear-gradient(180deg, #f6fbff, #ffffff);
+}
+
+.data-card.status-patched {
+  border-color: rgba(14, 165, 233, 0.26);
+  background: linear-gradient(180deg, #f0f9ff, #ffffff);
+}
+
 .data-card-head {
   display: flex;
   justify-content: space-between;
@@ -788,10 +817,121 @@ tbody tr:hover {
   font-size: 0.92rem;
 }
 
+.diff-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.diff-line {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+}
+
+.diff-line span {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.diff-line pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.diff-old {
+  background: #fffaf1;
+}
+
+.diff-new {
+  background: #f0fdf4;
+}
+
+.diff-summary {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #b45309;
+}
+
 .chip-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.tab-button {
+  border: 1px solid var(--line);
+  background: #f8fbff;
+  color: var(--muted-strong);
+  padding: 10px 14px;
+  border-radius: 999px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.tab-button:hover {
+  border-color: rgba(79, 70, 229, 0.28);
+  color: var(--accent-strong);
+}
+
+.tab-button.active {
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.14), rgba(14, 165, 233, 0.12));
+  border-color: rgba(79, 70, 229, 0.32);
+  color: var(--accent-strong);
+}
+
+.tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(79, 70, 229, 0.12);
+  border: 1px solid rgba(79, 70, 229, 0.18);
+  color: var(--accent-strong);
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.tab-panel[hidden] {
+  display: none;
+}
+
+.diff-details {
+  display: grid;
+  gap: 10px;
+}
+
+.diff-summary-toggle {
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: var(--accent-strong);
+}
+
+.diff-summary-toggle::-webkit-details-marker {
+  display: none;
 }
 
 .mini-chip {

@@ -12,9 +12,11 @@ import com.ainsoft.rag.embeddings.EmbeddingProvider
 import com.ainsoft.rag.impl.providerTelemetrySnapshot
 import com.ainsoft.rag.parsers.PlainTextParser
 import com.ainsoft.rag.parsers.TikaDocumentParser
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -23,8 +25,12 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.multipart.MultipartFile
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody
+import java.io.IOException
 import java.nio.charset.Charset
+import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicBoolean
 
 @RestController
 @RequestMapping("\${rag.admin.api-base-path:/api/rag/admin}")
@@ -36,6 +42,7 @@ class RagAdminApiController(
     private val adminService: RagAdminService,
     private val securityService: RagAdminSecurityService
 ) {
+    private val objectMapper = jacksonObjectMapper()
     private val plainTextParser = PlainTextParser()
     private val tikaDocumentParser = TikaDocumentParser()
 
@@ -56,8 +63,10 @@ class RagAdminApiController(
             description = "text ingest for $normalizedDocId",
             payload = mapOf("tenantId" to normalizedTenantId, "docId" to normalizedDocId)
         )
-        engine.upsert(
-            UpsertDocumentRequest(
+        val outcome = adminService.ingestDocument(
+            tenantId = normalizedTenantId,
+            docId = normalizedDocId,
+            request = UpsertDocumentRequest(
                 tenantId = normalizedTenantId,
                 docId = normalizedDocId,
                 normalizedText = request.text,
@@ -72,14 +81,27 @@ class RagAdminApiController(
                         offsetEnd = it.offsetEnd
                     )
                 }
-            )
+            ),
+            incrementalIngest = request.incrementalIngest
         )
-        adminService.completeJob(jobId, "SUCCESS", "document ingested")
+        adminService.completeJob(
+            jobId,
+            "SUCCESS",
+            when (outcome.status) {
+                "skipped" -> "document already ingested"
+                "changed" -> "document changed"
+                else -> "document ingested"
+            }
+        )
         adminService.recordProviderSnapshot("ingest")
         return RagAdminIngestResponse(
-            status = "ingested",
+            status = outcome.status,
             tenantId = normalizedTenantId,
-            docId = normalizedDocId
+            docId = normalizedDocId,
+            message = outcome.message,
+            previousPreview = outcome.previousPreview,
+            currentPreview = outcome.currentPreview,
+            changeSummary = outcome.changeSummary
         )
     }
 
@@ -96,7 +118,8 @@ class RagAdminApiController(
         @RequestParam(required = false) sourceUri: String?,
         @RequestParam(required = false) page: Int?,
         @RequestParam(required = false, defaultValue = "UTF-8") charset: String,
-        @RequestParam(required = false) metadata: String?
+        @RequestParam(required = false) metadata: String?,
+        @RequestParam(required = false, defaultValue = "true") incrementalIngest: Boolean
     ): RagAdminIngestResponse {
         val access = securityService.requireFeature(requestContext, "file-ingest")
         val normalizedTenantId = normalizeIdentifier(tenantId, "tenantId")
@@ -135,8 +158,10 @@ class RagAdminApiController(
             plainTextParser.parseText(text, sourceUri = effectiveSourceUri, page = page)
         }
 
-        engine.upsert(
-            UpsertDocumentRequest(
+        val outcome = adminService.ingestDocument(
+            tenantId = normalizedTenantId,
+            docId = normalizedDocId,
+            request = UpsertDocumentRequest(
                 tenantId = normalizedTenantId,
                 docId = normalizedDocId,
                 normalizedText = parsed.normalizedText,
@@ -145,15 +170,108 @@ class RagAdminApiController(
                 sourceUri = parsed.sourceUri,
                 page = parsed.page,
                 pageMarkers = parsed.pageMarkers
-            )
+            ),
+            incrementalIngest = incrementalIngest
         )
-        adminService.completeJob(jobId, "SUCCESS", "file ingested")
+        adminService.completeJob(
+            jobId,
+            "SUCCESS",
+            when (outcome.status) {
+                "skipped" -> "file already ingested"
+                "changed" -> "file changed"
+                else -> "file ingested"
+            }
+        )
         adminService.recordProviderSnapshot("ingest-file")
         return RagAdminIngestResponse(
-            status = "ingested",
+            status = outcome.status,
             tenantId = normalizedTenantId,
-            docId = normalizedDocId
+            docId = normalizedDocId,
+            message = outcome.message,
+            previousPreview = outcome.previousPreview,
+            currentPreview = outcome.currentPreview,
+            changeSummary = outcome.changeSummary
         )
+    }
+
+    @PostMapping("/web-ingest")
+    fun webIngest(
+        requestContext: HttpServletRequest,
+        @RequestBody request: RagAdminWebIngestRequest
+    ): RagAdminWebIngestResponse {
+        val access = securityService.requireFeature(requestContext, "web-ingest")
+        return adminService.webIngest(access.role, request)
+    }
+
+    @PostMapping(
+        "/web-ingest/stream",
+        consumes = [MediaType.APPLICATION_JSON_VALUE],
+        produces = [MediaType.TEXT_PLAIN_VALUE]
+    )
+    fun webIngestStream(
+        requestContext: HttpServletRequest,
+        @RequestBody request: RagAdminWebIngestRequest
+    ): ResponseEntity<StreamingResponseBody> {
+        val access = securityService.requireFeature(requestContext, "web-ingest")
+        val cancelled = AtomicBoolean(false)
+        val body = StreamingResponseBody { outputStream ->
+            outputStream.bufferedWriter(StandardCharsets.UTF_8).use { writer ->
+                fun writeLine(value: Any) {
+                    if (cancelled.get()) {
+                        return
+                    }
+                    writer.write(objectMapper.writeValueAsString(value))
+                    writer.write("\n")
+                    writer.flush()
+                }
+
+                try {
+                    writeLine(
+                        RagAdminWebIngestStreamEnvelope(
+                            type = "start",
+                            message = "starting web ingest"
+                        )
+                    )
+                    val response = adminService.webIngest(
+                        access.role,
+                        request,
+                        progressSink = { event ->
+                            writeLine(
+                                RagAdminWebIngestStreamEnvelope(
+                                    type = "progress",
+                                    event = event
+                                )
+                            )
+                        },
+                        isCancelled = { cancelled.get() }
+                    )
+                    if (!cancelled.get()) {
+                        writeLine(
+                            RagAdminWebIngestStreamEnvelope(
+                                type = "result",
+                                response = response
+                            )
+                        )
+                    }
+                } catch (_: IOException) {
+                    cancelled.set(true)
+                } catch (_: WebIngestCancelledException) {
+                    cancelled.set(true)
+                } catch (error: Exception) {
+                    if (!cancelled.get()) {
+                        writeLine(
+                            RagAdminWebIngestStreamEnvelope(
+                                type = "error",
+                                message = error.message ?: "web ingest failed"
+                            )
+                        )
+                    }
+                }
+            }
+        }
+        return ResponseEntity.ok()
+            .contentType(MediaType.TEXT_PLAIN)
+            .body(body)
     }
 
     @PostMapping("/search")
@@ -574,7 +692,8 @@ data class RagAdminIngestRequest(
     val metadata: Map<String, String> = emptyMap(),
     val sourceUri: String? = null,
     val page: Int? = null,
-    val pageMarkers: List<RagAdminPageMarkerRequest>? = null
+    val pageMarkers: List<RagAdminPageMarkerRequest>? = null,
+    val incrementalIngest: Boolean = true
 )
 
 data class RagAdminPageMarkerRequest(
@@ -586,7 +705,18 @@ data class RagAdminPageMarkerRequest(
 data class RagAdminIngestResponse(
     val status: String,
     val tenantId: String,
-    val docId: String
+    val docId: String,
+    val message: String? = null,
+    val previousPreview: String? = null,
+    val currentPreview: String? = null,
+    val changeSummary: String? = null
+)
+
+data class RagAdminWebIngestStreamEnvelope(
+    val type: String,
+    val message: String? = null,
+    val event: RagAdminWebIngestProgressEvent? = null,
+    val response: RagAdminWebIngestResponse? = null
 )
 
 data class RagAdminSearchRequest(

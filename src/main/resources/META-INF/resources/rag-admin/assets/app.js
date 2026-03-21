@@ -19,6 +19,7 @@
     { route: "documents", feature: "documents", label: "Documents", caption: "Browser and preview", section: "Retrieval", board: "Document Ledger" },
     { route: "text-ingest", feature: "text-ingest", label: "Text Ingest", caption: "Direct upsert", section: "Ingest", board: "Manual Ingest" },
     { route: "file-ingest", feature: "file-ingest", label: "File Ingest", caption: "Upload pipeline", section: "Ingest", board: "Upload Ingest" },
+    { route: "web-ingest", feature: "web-ingest", label: "Web Ingest", caption: "Site crawl ingest", section: "Ingest", board: "Web Crawler" },
     { route: "bulk-operations", feature: "bulk-operations", label: "Bulk Ops", caption: "Batch changes", section: "Ingest", board: "Batch Operations" },
     { route: "tenants", feature: "tenants", label: "Tenants & Index Ops", caption: "Snapshot and optimize", section: "Operations", board: "Tenant Operations" },
     { route: "config", feature: "config", label: "Config", caption: "Read-only settings", section: "Operations", board: "Configuration Board" },
@@ -51,6 +52,15 @@
     return Object.entries(value || {})
       .map(([key, entryValue]) => `${key}=${entryValue}`)
       .join("\n");
+  }
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll("\"", "&quot;")
+      .replaceAll("'", "&#39;");
   }
 
   function parseJsonInput(id, fallback) {
@@ -444,6 +454,57 @@
     }
   }
 
+  function readJson(id) {
+    const target = document.getElementById(id);
+    if (!target) return null;
+    const text = target.textContent || "";
+    if (!text.trim()) return null;
+    try {
+      return JSON.parse(text);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function renderTimeline(containerId, events) {
+    renderDataCards(
+      containerId,
+      (events || []).map((event, index) => ({
+        title: event.phase || `step ${index + 1}`,
+        meta: event.when || `#${index + 1}`,
+        body: event.message || "-",
+        className:
+          event.level === "error"
+            ? "status-failed"
+            : event.level === "warn"
+              ? "status-changed"
+              : event.level === "skip"
+                ? "status-skipped"
+                : "status-ingested",
+        chips: [
+          event.source || "trace",
+          event.kind || "stage",
+          event.status || "ok"
+        ]
+      }))
+    );
+  }
+
+  function renderPreviewDiff(previousPreview, currentPreview, summary) {
+    const previous = previousPreview ? escapeHtml(previousPreview) : "";
+    const current = currentPreview ? escapeHtml(currentPreview) : "";
+    if (!previous && !current) {
+      return summary ? `<div class="diff-summary">${escapeHtml(summary)}</div>` : "";
+    }
+    return `
+      <div class="diff-preview">
+        <div class="diff-line diff-old"><span>Old</span><pre>${previous || "(missing)"}</pre></div>
+        <div class="diff-line diff-new"><span>New</span><pre>${current || "(missing)"}</pre></div>
+      </div>
+      ${summary ? `<div class="diff-summary">${escapeHtml(summary)}</div>` : ""}
+    `;
+  }
+
   function setNotice(id, message, isError) {
     const target = document.getElementById(id);
     if (!target) return;
@@ -630,14 +691,14 @@
     list.className = "card-list";
     items.forEach((item) => {
       const card = document.createElement("article");
-      card.className = "data-card";
+      card.className = `data-card${item.className ? ` ${item.className}` : ""}`;
       const chips = (item.chips || []).map((chip) => `<span class="mini-chip">${chip}</span>`).join("");
       card.innerHTML = `
         <div class="data-card-head">
           <div class="data-card-title">${item.title}</div>
           <div class="data-card-meta">${item.meta || ""}</div>
         </div>
-        <div class="data-card-body">${item.body || ""}</div>
+        <div class="data-card-body">${item.bodyHtml != null ? item.bodyHtml : (item.body || "")}</div>
         ${chips ? `<div class="chip-row">${chips}</div>` : ""}
       `;
       list.appendChild(card);
@@ -1199,35 +1260,273 @@
   }
 
   function initTextIngest() {
+    function resultFilter() {
+      return document.getElementById("ingest-result-filter")?.value || "all";
+    }
+
+    function matchesFilter(status) {
+      const filter = resultFilter();
+      return filter === "all" || filter === status;
+    }
+
+    let traceEvents = [];
+
+    function setTrace(events) {
+      traceEvents = events;
+      renderTimeline("ingest-progress-log", traceEvents);
+    }
+
+    function renderTextIngestResults(response) {
+      const status = response.status || "unknown";
+      renderDataCards(
+        "ingest-result-cards",
+        matchesFilter(status)
+          ? [
+              {
+                title: status,
+                meta: `${response.tenantId || "-"} · ${response.docId || "-"}`,
+                body: response.message || "text ingest completed",
+                bodyHtml: status === "changed"
+                  ? renderPreviewDiff(response.previousPreview, response.currentPreview, response.changeSummary)
+                  : escapeHtml(response.message || "text ingest completed"),
+                className:
+                  status === "changed"
+                    ? "status-changed"
+                    : status === "skipped"
+                      ? "status-skipped"
+                      : status === "failed"
+                        ? "status-failed"
+                        : "status-ingested",
+                chips: [
+                  "text ingest",
+                  status
+                ]
+              }
+            ]
+          : []
+      );
+    }
+
+    function renderTextIngestSummary(response) {
+      renderDataCards(
+        "ingest-summary",
+        [
+          {
+            title: response.status || "unknown",
+            meta: `${response.tenantId || "-"} · ${response.docId || "-"}`,
+            body: response.message || "text ingest complete",
+            bodyHtml: response.status === "changed"
+              ? renderPreviewDiff(response.previousPreview, response.currentPreview, response.changeSummary)
+              : escapeHtml(response.message || "text ingest complete"),
+            className:
+              response.status === "changed"
+                ? "status-changed"
+                : response.status === "skipped"
+                  ? "status-skipped"
+                  : "status-ingested",
+            chips: [
+              Boolean(document.getElementById("ingest-incremental")?.checked) ? "incremental on" : "incremental off",
+              "text ingest",
+              response.status || "unknown"
+            ]
+          }
+        ]
+      );
+    }
+
     async function ingestText() {
+      const docId = document.getElementById("ingest-doc-id")?.value?.trim() || "";
+      const text = document.getElementById("ingest-text")?.value || "";
+      const acl = parseList(document.getElementById("ingest-acl")?.value);
+      const metadata = parseMap(document.getElementById("ingest-metadata")?.value);
+      const incremental = Boolean(document.getElementById("ingest-incremental")?.checked);
+      setTrace([
+        {
+          phase: "queued",
+          when: "now",
+          message: "validating text ingest request",
+          source: "text",
+          kind: "request",
+          status: "pending"
+        },
+        {
+          phase: "validated",
+          when: "now",
+          message: `docId ${docId || "(missing)"} / acl ${acl.length} principals / metadata ${Object.keys(metadata).length} entries`,
+          source: "text",
+          kind: "validation",
+          status: incremental ? "incremental on" : "incremental off"
+        },
+        {
+          phase: "dispatching",
+          when: "now",
+          message: `sending ${text.length} characters to ingest pipeline`,
+          source: "text",
+          kind: "request",
+          status: "running"
+        }
+      ]);
       const response = await request("/ingest", {
         method: "POST",
         body: JSON.stringify({
           tenantId: currentTenant(),
-          docId: document.getElementById("ingest-doc-id")?.value?.trim() || "",
-          text: document.getElementById("ingest-text")?.value || "",
-          acl: parseList(document.getElementById("ingest-acl")?.value),
-          metadata: parseMap(document.getElementById("ingest-metadata")?.value)
+          docId,
+          text,
+          acl,
+          metadata,
+          incrementalIngest: incremental
         })
       });
       renderJson("output-ingest", response);
-      setNotice("ingest-notice", "text document ingested", false);
+      setTrace([
+        ...traceEvents,
+        {
+          phase: "normalized",
+          when: "now",
+          message: "text normalized and hashed",
+          source: "text",
+          kind: "normalize",
+          status: "running"
+        },
+        {
+          phase: "upserted",
+          when: "now",
+          message: response.status === "skipped" ? "no upsert required" : "document stored",
+          source: "text",
+          kind: "upsert",
+          status: response.status || "unknown",
+          level: response.status === "failed" ? "error" : response.status === "skipped" ? "skip" : "ok"
+        },
+        {
+          phase: "completed",
+          when: "now",
+          message: response.message || `status: ${response.status || "processed"}`,
+          source: "text",
+          kind: "result",
+          status: response.status || "unknown",
+          level: response.status === "failed" ? "error" : response.status === "skipped" ? "skip" : "ok"
+        }
+      ]);
+      renderTextIngestSummary(response);
+      renderTextIngestResults(response);
+      setNotice("ingest-notice", response.message || `text document ${response.status || "processed"}`, false);
     }
 
     document.getElementById("btn-ingest")?.addEventListener("click", () => run("ingest-notice", ingestText));
+    document.getElementById("ingest-result-filter")?.addEventListener("change", () => {
+      const output = readJson("output-ingest");
+      if (output) {
+        renderTextIngestResults(output);
+      }
+    });
   }
 
   function initFileIngest() {
+    function resultFilter() {
+      return document.getElementById("upload-result-filter")?.value || "all";
+    }
+
+    function matchesFilter(status) {
+      const filter = resultFilter();
+      return filter === "all" || filter === status;
+    }
+
+    let traceEvents = [];
+
+    function setTrace(events) {
+      traceEvents = events;
+      renderTimeline("upload-progress-log", traceEvents);
+    }
+
+    function renderFileIngestResults(response) {
+      const status = response.status || "unknown";
+      renderDataCards(
+        "upload-result-cards",
+        matchesFilter(status)
+          ? [
+              {
+                title: status,
+                meta: `${response.tenantId || "-"} · ${response.docId || "-"}`,
+                body: response.message || "file ingest completed",
+                bodyHtml: status === "changed"
+                  ? renderPreviewDiff(response.previousPreview, response.currentPreview, response.changeSummary)
+                  : escapeHtml(response.message || "file ingest completed"),
+                className:
+                  status === "changed"
+                    ? "status-changed"
+                    : status === "skipped"
+                      ? "status-skipped"
+                      : status === "failed"
+                        ? "status-failed"
+                        : "status-ingested",
+                chips: [
+                  "file ingest",
+                  status
+                ]
+              }
+            ]
+          : []
+      );
+    }
+
+    function renderFileIngestSummary(response) {
+      renderDataCards(
+        "upload-summary",
+        [
+          {
+            title: response.status || "unknown",
+            meta: `${response.tenantId || "-"} · ${response.docId || "-"}`,
+            body: response.message || "file ingest complete",
+            bodyHtml: response.status === "changed"
+              ? renderPreviewDiff(response.previousPreview, response.currentPreview, response.changeSummary)
+              : escapeHtml(response.message || "file ingest complete"),
+            className:
+              response.status === "changed"
+                ? "status-changed"
+                : response.status === "skipped"
+                  ? "status-skipped"
+                  : "status-ingested",
+            chips: [
+              Boolean(document.getElementById("upload-incremental")?.checked) ? "incremental on" : "incremental off",
+              "file ingest",
+              response.status || "unknown"
+            ]
+          }
+        ]
+      );
+    }
+
     async function uploadFile() {
+      const docId = document.getElementById("upload-doc-id")?.value?.trim() || "";
+      const incremental = Boolean(document.getElementById("upload-incremental")?.checked);
+      setTrace([
+        {
+          phase: "queued",
+          when: "now",
+          message: "preparing upload payload",
+          source: "file",
+          kind: "request",
+          status: "pending"
+        },
+        {
+          phase: "parsing",
+          when: "now",
+          message: "detecting file type and parsing content",
+          source: "file",
+          kind: "parse",
+          status: "running"
+        }
+      ]);
       const file = document.getElementById("upload-file")?.files?.[0];
       if (!file) {
         throw new Error("upload file is required");
       }
       const formData = new FormData();
       formData.set("tenantId", currentTenant());
-      formData.set("docId", document.getElementById("upload-doc-id")?.value?.trim() || "");
+      formData.set("docId", docId);
       parseList(document.getElementById("upload-acl")?.value).forEach((item) => formData.append("acl", item));
       formData.set("metadata", document.getElementById("upload-metadata")?.value || "");
+      formData.set("incrementalIngest", String(incremental));
       formData.set("file", file);
 
       const response = await request("/ingest-file", {
@@ -1235,10 +1534,370 @@
         body: formData
       });
       renderJson("output-upload", response);
-      setNotice("upload-notice", "file ingested", false);
+      setTrace([
+        ...traceEvents,
+        {
+          phase: "normalized",
+          when: "now",
+          message: `${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB) normalized`,
+          source: "file",
+          kind: "normalize",
+          status: "running"
+        },
+        {
+          phase: "validated",
+          when: "now",
+          message: `docId ${docId || "(missing)"} / incremental ${incremental ? "on" : "off"}`,
+          source: "file",
+          kind: "validation",
+          status: "running"
+        },
+        {
+          phase: "completed",
+          when: "now",
+          message: response.message || `status: ${response.status || "processed"}`,
+          source: "file",
+          kind: "result",
+          status: response.status || "unknown",
+          level: response.status === "failed" ? "error" : response.status === "skipped" ? "skip" : "ok"
+        }
+      ]);
+      renderFileIngestSummary(response);
+      renderFileIngestResults(response);
+      setNotice("upload-notice", response.message || `file ${response.status || "processed"}`, false);
     }
 
     document.getElementById("btn-upload")?.addEventListener("click", () => run("upload-notice", uploadFile));
+    document.getElementById("upload-result-filter")?.addEventListener("change", () => {
+      const output = readJson("output-upload");
+      if (output) {
+        renderFileIngestResults(output);
+      }
+    });
+  }
+
+  function initWebIngest() {
+    let activeController = null;
+    let lastResult = null;
+    let lastProgressEvents = [];
+
+    function resultFilter() {
+      return document.getElementById("web-result-filter")?.value || "all";
+    }
+
+    function filteredResults(response) {
+      const results = response?.results || [];
+      const filter = resultFilter();
+      if (filter === "all") {
+        return results;
+      }
+      if (filter === "changed") {
+        return results.filter((item) => item.status === "changed");
+      }
+      return results.filter((item) => item.source === filter);
+    }
+
+    function resultSummary(response) {
+      return (response?.results || []).reduce((acc, item) => {
+        const key = item.source || "unknown";
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+    }
+
+    function renderWebIngestProgress(response) {
+      const counts = resultSummary(response);
+      const visibleResults = filteredResults(response);
+      const allResults = response.results || [];
+
+      renderDataCards("web-progress-summary", [
+        {
+          title: "Seed URLs",
+          meta: "Crawler input",
+          body: `${(response.urls || []).length} urls`,
+          chips: (response.urls || []).slice(0, 3)
+        },
+        {
+          title: "Crawled Pages",
+          meta: "Fetch result",
+          body: `${response.crawledPages || 0} pages`,
+          chips: [
+            `ingested ${response.ingestedPages || 0}`,
+            `changed ${response.changedPages || 0}`,
+            `failures ${(response.failures || []).length}`
+          ]
+        },
+        {
+          title: "Results",
+          meta: `Showing ${resultFilter()}`,
+          body: `${visibleResults.length} / ${allResults.length}`,
+          chips: [
+            `sitemap ${counts.sitemap || 0}`,
+            `seed ${counts.seed || 0}`,
+            `link ${counts.link || 0}`,
+            `changed ${response.changedPages || 0}`,
+            `skipped ${response.skippedPages || 0}`
+          ]
+        }
+      ]);
+
+      renderTimeline(
+        "web-progress-log",
+        (response.progress || []).map((event) => ({
+          title: event.phase,
+          when: event.current != null && event.total != null ? `${event.current}/${event.total}` : "stage",
+          body: event.message,
+          meta: event.url || "-",
+          chips: [
+            event.depth != null ? `depth ${event.depth}` : "depth n/a",
+            event.phase
+          ]
+        }))
+      );
+    }
+
+    function renderWebIngestResults(response) {
+      const results = filteredResults(response);
+      renderDataCards(
+        "web-result-cards",
+        results.map((item) => {
+          const status = item.status || "unknown";
+          const previousPreview = item.previousPreview ? escapeHtml(item.previousPreview) : "";
+          const currentPreview = item.currentPreview ? escapeHtml(item.currentPreview) : "";
+          const diffHtml = item.status === "changed" && (previousPreview || currentPreview)
+            ? `
+              <div class="diff-preview">
+                <div class="diff-line diff-old"><span>Old</span><pre>${previousPreview || "(missing)"}</pre></div>
+                <div class="diff-line diff-new"><span>New</span><pre>${currentPreview || "(missing)"}</pre></div>
+              </div>
+            `
+            : "";
+          return {
+            title: item.title || item.url,
+            meta: `${item.source || "unknown"} · ${status}`,
+            body: item.message || item.url,
+            bodyHtml: item.status === "changed" ? `${diffHtml}${item.changeSummary ? `<div class="diff-summary">${escapeHtml(item.changeSummary)}</div>` : ""}` : escapeHtml(item.message || item.url || ""),
+            className:
+              status === "changed"
+                ? "status-changed"
+                : status === "skipped"
+                  ? "status-skipped"
+                  : status === "failed"
+                    ? "status-failed"
+                    : "status-ingested",
+            chips: [
+              item.depth != null ? `depth ${item.depth}` : "depth n/a",
+              item.docId || "no docId",
+              item.url || "-"
+            ]
+          };
+        })
+      );
+    }
+
+    function webIngestPayload() {
+      return {
+        tenantId: currentTenant(),
+        urls: parseList(document.getElementById("web-urls")?.value),
+        allowedDomains: parseList(document.getElementById("web-allowed-domains")?.value),
+        acl: parseList(document.getElementById("web-acl")?.value),
+        metadata: parseMap(document.getElementById("web-metadata")?.value),
+        respectRobotsTxt: Boolean(document.getElementById("web-respect-robots")?.checked),
+        incrementalIngest: Boolean(document.getElementById("web-incremental")?.checked),
+        maxPages: Number(document.getElementById("web-max-pages")?.value || 25),
+        maxDepth: Number(document.getElementById("web-max-depth")?.value || 1),
+        sameHostOnly: Boolean(document.getElementById("web-same-host")?.checked),
+        charset: document.getElementById("web-charset")?.value?.trim() || "UTF-8"
+      };
+    }
+
+    function requestUrl(path) {
+      const url = new URL(`${config.apiBasePath}${path}`, window.location.origin);
+      const context = loadContext();
+      if (context.accessToken) {
+        url.searchParams.set(config.tokenQueryParameter, context.accessToken);
+      }
+      return { url: url.toString(), context };
+    }
+
+    function setRunning(isRunning) {
+      const runButton = document.getElementById("btn-web-ingest");
+      const cancelButton = document.getElementById("btn-web-cancel");
+      if (runButton) {
+        runButton.disabled = isRunning;
+      }
+      if (cancelButton) {
+        cancelButton.disabled = !isRunning;
+      }
+    }
+
+    function applyResultFilter() {
+      if (!lastResult) {
+        return;
+      }
+      renderJson("output-web-ingest", {
+        ...lastResult,
+        results: filteredResults(lastResult)
+      });
+      renderWebIngestResults(lastResult);
+    }
+
+    document.getElementById("web-result-filter")?.addEventListener("change", applyResultFilter);
+
+    async function webIngest() {
+      if (activeController) {
+        activeController.abort();
+      }
+      const controller = new AbortController();
+      activeController = controller;
+      const payload = webIngestPayload();
+      lastResult = null;
+      lastProgressEvents = [];
+      renderDataCards("web-progress-summary", []);
+      renderTimeline("web-progress-log", []);
+      renderJson("output-web-ingest", {});
+      setRunning(true);
+      setNotice("web-notice", "web ingest streaming...", false);
+
+      const { url, context } = requestUrl("/web-ingest/stream");
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            Accept: "text/plain",
+            "Content-Type": "application/json",
+            ...(context.accessToken && config.tokenHeaderName
+              ? { [config.tokenHeaderName]: context.accessToken }
+              : {})
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+
+        if (!response.ok || !response.body) {
+          throw new Error(`Request failed with ${response.status}`);
+        }
+
+        const decoder = new TextDecoder();
+        const reader = response.body.getReader();
+        let buffer = "";
+        let finalResult = null;
+
+        const flushLine = (line) => {
+          if (!line.trim()) {
+            return;
+          }
+          const event = JSON.parse(line);
+          if (event.type === "progress" && event.event) {
+            lastProgressEvents.push(event.event);
+            renderDataCards("web-progress-summary", [
+              {
+                title: "Seed URLs",
+                meta: "Crawler input",
+                body: `${payload.urls.length} urls`,
+                chips: payload.urls.slice(0, 3)
+              },
+              {
+                title: "Crawled Pages",
+                meta: "Fetch result",
+                body: `${lastProgressEvents.filter((item) => item.phase === "crawl").length} pages`,
+                chips: [
+                  `ingested ${lastProgressEvents.filter((item) => item.phase === "ingest").length}`,
+                  `changed ${lastProgressEvents.filter((item) => item.phase === "changed").length}`,
+                  `skipped ${lastProgressEvents.filter((item) => item.phase === "skip-existing").length}`,
+                  `failures ${lastProgressEvents.filter((item) => item.phase === "ingest-failed" || item.phase === "fetch" || item.phase === "skip").length}`
+                ]
+              },
+              {
+                title: "Progress Events",
+                meta: "Timeline",
+                body: `${lastProgressEvents.length} events`,
+                chips: lastProgressEvents.slice(-3).map((item) => item.phase)
+              }
+            ]);
+
+            renderTimeline(
+              "web-progress-log",
+              lastProgressEvents.map((item) => ({
+                title: item.phase,
+                when: item.current != null && item.total != null ? `${item.current}/${item.total}` : "stage",
+                body: item.message,
+                meta: item.url || "-",
+                chips: [
+                  item.depth != null ? `depth ${item.depth}` : "depth n/a",
+                  item.phase
+                ]
+              }))
+            );
+            setNotice(
+              "web-notice",
+              `live: ${lastProgressEvents.some((item) => item.phase === "sitemap") ? "sitemap" : "crawl"} · ${lastProgressEvents.filter((item) => item.phase === "ingest").length} ingested`,
+              false
+            );
+          } else if (event.type === "result" && event.response) {
+            finalResult = event.response;
+          } else if (event.type === "error") {
+            throw new Error(event.message || "web ingest failed");
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let newlineIndex = buffer.indexOf("\n");
+          while (newlineIndex >= 0) {
+            const line = buffer.slice(0, newlineIndex);
+            buffer = buffer.slice(newlineIndex + 1);
+            flushLine(line);
+            newlineIndex = buffer.indexOf("\n");
+          }
+        }
+        const tail = buffer.trim();
+        if (tail) {
+          flushLine(tail);
+        }
+
+        if (controller.signal.aborted) {
+          setNotice("web-notice", "web ingest canceled", false);
+          return;
+        }
+        if (!finalResult) {
+          throw new Error("web ingest stream closed before a final result was received");
+        }
+
+        lastResult = finalResult;
+        renderJson("output-web-ingest", {
+          ...finalResult,
+          results: filteredResults(finalResult)
+        });
+        renderWebIngestProgress(finalResult);
+        renderWebIngestResults(finalResult);
+        setNotice(
+          "web-notice",
+          `sitemap ${finalResult.progress?.find((event) => event.phase === "sitemap") ? "checked" : "skipped"} · ${finalResult.crawledPages} crawled · ${finalResult.ingestedPages} ingested · ${finalResult.changedPages || 0} changed · ${finalResult.skippedPages || 0} skipped`,
+          false
+        );
+      } catch (error) {
+        if (error?.name === "AbortError") {
+          setNotice("web-notice", "web ingest canceled", false);
+          return;
+        }
+        throw error;
+      } finally {
+        if (activeController === controller) {
+          setRunning(false);
+          activeController = null;
+        }
+      }
+    }
+
+    document.getElementById("btn-web-ingest")?.addEventListener("click", () => run("web-notice", webIngest));
+    document.getElementById("btn-web-cancel")?.addEventListener("click", () => {
+      if (activeController) {
+        activeController.abort();
+      }
+    });
   }
 
   function initDocuments() {
@@ -2009,19 +2668,169 @@
   }
 
   function initBulkOperations() {
+    function resultFilter() {
+      return document.getElementById("bulk-result-filter")?.value || "all";
+    }
+
+    function matchesFilter(status) {
+      const filter = resultFilter();
+      return filter === "all" || filter === status;
+    }
+
+    let traceEvents = [];
+
+    function setTrace(events) {
+      traceEvents = events;
+      renderTimeline("bulk-progress-log", traceEvents);
+    }
+
+    function bulkStatusClass(item) {
+      if (item.status === "changed") return "status-changed";
+      if (item.status === "skipped") return "status-skipped";
+      if (item.status === "deleted") return "status-deleted";
+      if (item.status === "patched") return "status-patched";
+      if (item.success === false) return "status-failed";
+      return "status-ingested";
+    }
+
+    function renderBulkResultCards(response) {
+      const items = [];
+      if ((response.results || []).length > 0) {
+        items.push(...response.results
+          .filter((item) => matchesFilter(item.status || (item.success ? "ingested" : "failed")))
+          .map((item) => ({
+            title: item.docId || "unknown",
+            meta: item.status || (item.success ? "success" : "failed"),
+            body: item.message || "bulk item processed",
+            bodyHtml: item.status === "changed"
+              ? renderPreviewDiff(item.previousPreview, item.currentPreview, item.changeSummary)
+              : escapeHtml(item.message || "bulk item processed"),
+            className: bulkStatusClass(item),
+            chips: [
+              item.success ? "success" : "failed",
+              item.status || "n/a"
+            ]
+          })));
+      } else {
+        items.push({
+          title: response.operation || "bulk operation",
+          meta: `success ${response.successCount || 0} / failure ${response.failureCount || 0}`,
+          body: "No item-level results returned.",
+          className: "status-ingested",
+          chips: ["bulk", response.operation || "operation"]
+        });
+      }
+      renderDataCards("bulk-result-cards", items);
+    }
+
+    function renderBulkSummary(response) {
+      const skippedCount = (response.results || []).filter((item) => item.status === "skipped").length;
+      const changedCount = (response.results || []).filter((item) => item.status === "changed").length;
+      const failedCount = (response.results || []).filter((item) => item.success === false).length;
+      renderDataCards(
+        "bulk-summary",
+        [
+          {
+            title: response.operation || "bulk operation",
+            meta: `success ${response.successCount || 0} / failure ${response.failureCount || 0}`,
+            body: "bulk ingest and follow-up actions are summarized here",
+            bodyHtml: `<div class="chip-row">${
+              [
+                `changed ${changedCount}`,
+                `skipped ${skippedCount}`,
+                `failed ${failedCount}`
+              ].map((chip) => `<span class="mini-chip">${escapeHtml(chip)}</span>`).join("")
+            }</div>`,
+            className: failedCount > 0 ? "status-failed" : "status-ingested",
+            chips: [
+              `changed ${changedCount}`,
+              `skipped ${skippedCount}`,
+              `failed ${failedCount}`
+            ]
+          }
+        ]
+      );
+    }
+
     async function bulkTextIngest() {
+      const documents = parseJsonInput("bulk-ingest-json", []);
+      const incremental = Boolean(document.getElementById("bulk-ingest-incremental")?.checked);
+      setTrace([
+        {
+          phase: "queued",
+          when: "now",
+          message: "bulk ingest payload prepared",
+          source: "bulk",
+          kind: "request",
+          status: "pending"
+        },
+        {
+          phase: "validated",
+          when: "now",
+          message: `${documents.length} documents queued for ingest`,
+          source: "bulk",
+          kind: "validation",
+          status: incremental ? "incremental on" : "incremental off"
+        },
+        {
+          phase: "dispatching",
+          when: "now",
+          message: "sending document array to ingest pipeline",
+          source: "bulk",
+          kind: "request",
+          status: "running"
+        }
+      ]);
       const response = await request("/bulk/text-ingest", {
         method: "POST",
         body: JSON.stringify({
           tenantId: currentTenant(),
-          documents: parseJsonInput("bulk-ingest-json", [])
+          documents,
+          incrementalIngest: incremental
         })
       });
       renderJson("output-bulk", response);
-      setNotice("bulk-notice", `bulk text ingest completed with ${response.successCount} successes`, false);
+      setTrace([
+        ...traceEvents,
+        ...(response.results || []).map((item) => ({
+          phase: item.docId || "document",
+          when: "now",
+          message: `${item.status || (item.success ? "ingested" : "failed")}: ${item.message || "bulk item processed"}`,
+          source: "bulk",
+          kind: "item",
+          status: item.status || (item.success ? "ingested" : "failed"),
+          level: item.success === false ? "error" : item.status === "skipped" ? "skip" : item.status === "changed" ? "warn" : "ok"
+        })),
+        {
+          phase: "completed",
+          when: "now",
+          message: `success ${response.successCount || 0}, failure ${response.failureCount || 0}`,
+          source: "bulk",
+          kind: "result",
+          status: response.failureCount > 0 ? "failed" : "ingested",
+          level: response.failureCount > 0 ? "error" : "ok"
+        }
+      ]);
+      renderBulkSummary(response);
+      renderBulkResultCards(response);
+      const skippedCount = (response.results || []).filter((item) => /skipped/i.test(item.message || "")).length;
+      const changedCount = (response.results || []).filter((item) => /changed/i.test(item.message || "")).length;
+      const suffix = skippedCount || changedCount
+        ? `, ${changedCount} changed, ${skippedCount} skipped`
+        : "";
+      setNotice("bulk-notice", `bulk text ingest completed with ${response.successCount} successes${suffix}`, false);
     }
 
     async function bulkDelete() {
+      setTrace([
+        {
+          phase: "queued",
+          when: "now",
+          message: "bulk delete request prepared",
+          source: "bulk",
+          kind: "delete"
+        }
+      ]);
       const response = await request("/bulk/delete", {
         method: "POST",
         body: JSON.stringify({
@@ -2030,10 +2839,33 @@
         })
       });
       renderJson("output-bulk", response);
+      setTrace([
+        ...traceEvents,
+        {
+          phase: "completed",
+          when: "now",
+          message: `deleted ${response.successCount || 0} docs`,
+          source: "bulk",
+          kind: "result",
+          status: response.failureCount > 0 ? "failed" : "deleted",
+          level: response.failureCount > 0 ? "error" : "ok"
+        }
+      ]);
+      renderBulkSummary(response);
+      renderBulkResultCards(response);
       setNotice("bulk-notice", `bulk delete completed with ${response.successCount} successes`, false);
     }
 
     async function bulkMetadataPatch() {
+      setTrace([
+        {
+          phase: "queued",
+          when: "now",
+          message: "metadata patch request prepared",
+          source: "bulk",
+          kind: "patch"
+        }
+      ]);
       const response = await request("/bulk/metadata-patch", {
         method: "POST",
         body: JSON.stringify({
@@ -2043,12 +2875,33 @@
         })
       });
       renderJson("output-bulk", response);
+      setTrace([
+        ...traceEvents,
+        {
+          phase: "completed",
+          when: "now",
+          message: `patched ${response.successCount || 0} docs`,
+          source: "bulk",
+          kind: "result",
+          status: response.failureCount > 0 ? "failed" : "patched",
+          level: response.failureCount > 0 ? "error" : "ok"
+        }
+      ]);
+      renderBulkSummary(response);
+      renderBulkResultCards(response);
       setNotice("bulk-notice", `metadata patch completed with ${response.successCount} successes`, false);
     }
 
     document.getElementById("btn-bulk-ingest")?.addEventListener("click", () => run("bulk-notice", bulkTextIngest));
     document.getElementById("btn-bulk-delete")?.addEventListener("click", () => run("bulk-notice", bulkDelete));
     document.getElementById("btn-bulk-patch")?.addEventListener("click", () => run("bulk-notice", bulkMetadataPatch));
+    document.getElementById("bulk-result-filter")?.addEventListener("change", () => {
+      const output = readJson("output-bulk");
+      if (output) {
+        renderBulkResultCards(output);
+        renderBulkSummary(output);
+      }
+    });
   }
 
   function initPage() {
@@ -2066,6 +2919,9 @@
         break;
       case "file-ingest":
         initFileIngest();
+        break;
+      case "web-ingest":
+        initWebIngest();
         break;
       case "documents":
         initDocuments();

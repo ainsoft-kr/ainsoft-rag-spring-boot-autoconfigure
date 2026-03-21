@@ -27,6 +27,7 @@ private fun defaultFeatureRoles(): Map<String, List<String>> = mapOf(
     "search" to listOf("ADMIN", "OPS", "AUDITOR"),
     "text-ingest" to listOf("ADMIN", "OPS"),
     "file-ingest" to listOf("ADMIN", "OPS"),
+    "web-ingest" to listOf("ADMIN", "OPS"),
     "documents" to listOf("ADMIN", "OPS", "AUDITOR"),
     "tenants" to listOf("ADMIN", "OPS"),
     "provider-history" to listOf("ADMIN", "OPS", "AUDITOR"),
