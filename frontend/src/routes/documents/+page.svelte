@@ -7,7 +7,7 @@
   page="documents"
   copy="Document browser with stored metadata, ACL insight, and source preview."
 >
-  <section class="grid">
+  <section class="grid documents-grid">
     <article class="panel">
       <div class="panel-header"><div><h2>Browse Filters</h2><p>tenant 범위에서 문서를 검색하고 목록을 새로고침합니다.</p></div></div>
       <div class="stack">
@@ -78,4 +78,3 @@
     </article>
   </section>
 </AdminPage>
-

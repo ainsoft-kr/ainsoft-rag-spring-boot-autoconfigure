@@ -7,7 +7,7 @@
   page="web-ingest"
   copy="Seed URL 기반으로 웹사이트를 따라가며 본문을 추출하고 자동 ingest합니다."
 >
-  <section class="grid">
+  <section class="grid web-ingest-grid">
     <article class="panel">
       <div class="panel-header"><div><h2>Crawl Sheet</h2><p>같은 host 안에서 링크를 따라가며 문서를 순차 ingest합니다.</p></div></div>
       <div class="stack">

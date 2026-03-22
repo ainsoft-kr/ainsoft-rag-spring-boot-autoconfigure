@@ -7,7 +7,7 @@
   page="text-ingest"
   copy="Direct content upsert desk for operational notes and curated documents."
 >
-  <section class="grid">
+  <section class="grid text-ingest-grid">
     <article class="panel">
       <div class="panel-header"><div><h2>Input Sheet</h2><p>Text ingest 작업은 Job History에 자동 기록됩니다.</p></div></div>
       <div class="stack">

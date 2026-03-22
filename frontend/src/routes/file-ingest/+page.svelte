@@ -7,7 +7,7 @@
   page="file-ingest"
   copy="Upload-focused ingest pipeline for binary and text assets."
 >
-  <section class="grid">
+  <section class="grid file-ingest-grid">
     <article class="panel">
       <div class="panel-header"><div><h2>Upload Sheet</h2><p>업로드 기반 ingest 역시 Job History에서 추적됩니다.</p></div></div>
       <div class="stack">
