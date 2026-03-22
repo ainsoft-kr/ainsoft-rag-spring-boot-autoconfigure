@@ -14,6 +14,9 @@ import com.ainsoft.rag.parsers.PlainTextParser
 import com.ainsoft.rag.parsers.TikaDocumentParser
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import jakarta.servlet.http.HttpServletRequest
+import org.apache.lucene.analysis.Analyzer
+import org.apache.lucene.analysis.ko.KoreanAnalyzer
+import org.apache.lucene.analysis.tokenattributes.CharTermAttribute
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -23,6 +26,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.multipart.MultipartFile
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody
@@ -31,6 +35,7 @@ import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
+import java.text.Normalizer
 
 @RestController
 @RequestMapping("\${rag.admin.api-base-path:/api/rag/admin}")
@@ -40,7 +45,8 @@ class RagAdminApiController(
     private val ragConfig: RagConfig,
     private val embeddingProvider: EmbeddingProvider,
     private val adminService: RagAdminService,
-    private val securityService: RagAdminSecurityService
+    private val securityService: RagAdminSecurityService,
+    private val accountManagementService: RagAdminAccountManagementService
 ) {
     private val objectMapper = jacksonObjectMapper()
     private val plainTextParser = PlainTextParser()
@@ -316,6 +322,10 @@ class RagAdminApiController(
             providerTelemetry = globalProviderHealth.toResponse(request.providerHealthDetail),
             recentProviderWindowMillis = request.recentProviderWindowMillis,
             recentProviderTelemetry = recentProviderHealth?.toResponse(request.providerHealthDetail)
+        ).applyExactMatchFilterIfRequested(request)
+        .suppressWeakMatches(
+            finalConfidenceThreshold = request.searchNoMatchMinFinalConfidence ?: properties.searchNoMatchMinFinalConfidence,
+            topHitScoreThreshold = request.searchNoMatchMinTopHitScore ?: properties.searchNoMatchMinTopHitScore
         )
         adminService.recordSearchAudit("search", access.role, request, result.hits.size, result.telemetry)
         return result
@@ -610,7 +620,7 @@ class RagAdminApiController(
     @GetMapping("/access-security")
     fun accessSecurity(requestContext: HttpServletRequest): RagAdminAccessSecurityResponse {
         securityService.requireFeature(requestContext, "access-security")
-        return adminService.accessSecurity(securityService.currentRole(requestContext))
+        return adminService.accessSecurity(securityService.resolveAccess(requestContext))
     }
 
     @GetMapping("/config")
@@ -644,6 +654,89 @@ class RagAdminApiController(
     ): RagAdminBulkOperationResponse {
         securityService.requireFeature(requestContext, "bulk-operations")
         return adminService.bulkMetadataPatch(request)
+    }
+
+    @GetMapping("/users")
+    fun listUsers(
+        requestContext: HttpServletRequest,
+        @RequestParam(required = false) q: String?,
+        @RequestParam(required = false) sort: String?,
+        @RequestParam(required = false) direction: String?,
+        @RequestParam(required = false) auditAction: String?,
+        @RequestParam(required = false) auditQuery: String?,
+        @RequestParam(required = false) auditFrom: String?,
+        @RequestParam(required = false) auditTo: String?,
+        @RequestParam(required = false, defaultValue = "20") auditLimit: Int,
+        @RequestParam(required = false, defaultValue = "0") auditOffset: Int
+    ): RagAdminUsersResponse {
+        securityService.requireFeature(requestContext, "users")
+        val auditEntries = adminService.listUserAudits(
+            limit = auditLimit,
+            offset = auditOffset,
+            action = auditAction,
+            query = auditQuery,
+            fromEpochMillis = parseEpochMillis(auditFrom),
+            toEpochMillis = parseEpochMillis(auditTo)?.plus(86_399_999L)
+        )
+        return accountManagementService.listUsers(
+            query = q,
+            sort = sort,
+            direction = direction
+        ).copy(
+            recentActions = auditEntries.map { it.toResponse() },
+            auditTotalCount = adminService.listUserAudits(
+                limit = Int.MAX_VALUE,
+                offset = 0,
+                action = auditAction,
+                query = auditQuery,
+                fromEpochMillis = parseEpochMillis(auditFrom),
+                toEpochMillis = parseEpochMillis(auditTo)?.plus(86_399_999L)
+            ).size,
+            auditOffset = auditOffset,
+            auditLimit = auditLimit,
+            auditAction = auditAction,
+            auditQuery = auditQuery,
+            auditFrom = auditFrom,
+            auditTo = auditTo
+        )
+    }
+
+    @PostMapping("/users")
+    fun createUser(
+        requestContext: HttpServletRequest,
+        @RequestBody request: RagAdminUserUpsertRequest
+    ): RagAdminUserResponse {
+        val access = securityService.requireFeature(requestContext, "users")
+        return accountManagementService.createUser(access, request)
+    }
+
+    @PutMapping("/users/{username}")
+    fun updateUser(
+        requestContext: HttpServletRequest,
+        @PathVariable username: String,
+        @RequestBody request: RagAdminUserUpsertRequest
+    ): RagAdminUserResponse {
+        val access = securityService.requireFeature(requestContext, "users")
+        return accountManagementService.updateUser(access, username, request)
+    }
+
+    @DeleteMapping("/users/{username}")
+    fun deleteUser(
+        requestContext: HttpServletRequest,
+        @PathVariable username: String
+    ) {
+        val access = securityService.requireFeature(requestContext, "users")
+        accountManagementService.deleteUser(access, username)
+    }
+
+    @PostMapping("/users/{username}/password")
+    fun resetPassword(
+        requestContext: HttpServletRequest,
+        @PathVariable username: String,
+        @RequestBody request: RagAdminUserPasswordResetRequest
+    ): RagAdminUserResponse {
+        val access = securityService.requireFeature(requestContext, "users")
+        return accountManagementService.resetPassword(access, username, request.password)
     }
 
     private fun parseMetadata(raw: String?): Map<String, String> {
@@ -682,25 +775,69 @@ class RagAdminApiController(
         val name = filename?.lowercase() ?: return false
         return name.endsWith(".pdf") || name.endsWith(".docx") || name.endsWith(".pptx")
     }
+
+    private fun parseEpochMillis(raw: String?): Long? {
+        val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return try {
+            java.time.LocalDate.parse(value).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+        } catch (_: Exception) {
+            try {
+                java.time.Instant.parse(value).toEpochMilli()
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
 }
 
-data class RagAdminIngestRequest(
-    val tenantId: String,
-    val docId: String,
-    val text: String,
-    val acl: List<String>,
-    val metadata: Map<String, String> = emptyMap(),
-    val sourceUri: String? = null,
-    val page: Int? = null,
-    val pageMarkers: List<RagAdminPageMarkerRequest>? = null,
-    val incrementalIngest: Boolean = true
+data class RagAdminUserResponse(
+    val username: String,
+    val displayName: String? = null,
+    val enabled: Boolean,
+    val roles: List<String>,
+    val passwordConfigured: Boolean,
+    val isAdmin: Boolean
 )
 
-data class RagAdminPageMarkerRequest(
-    val page: Int,
-    val offsetStart: Int,
-    val offsetEnd: Int
+data class RagAdminUsersResponse(
+    val items: List<RagAdminUserResponse>,
+    val totalCount: Int,
+    val enabledCount: Int,
+    val adminCount: Int,
+    val recentActions: List<RagAdminUserAuditResponse> = emptyList(),
+    val auditTotalCount: Int = 0,
+    val auditOffset: Int = 0,
+    val auditLimit: Int = 20,
+    val auditAction: String? = null,
+    val auditQuery: String? = null,
+    val auditFrom: String? = null,
+    val auditTo: String? = null
 )
+
+data class RagAdminUserAuditResponse(
+    val id: String,
+    val timestampEpochMillis: Long,
+    val action: String,
+    val actorUsername: String?,
+    val actorRole: String?,
+    val targetUsername: String,
+    val success: Boolean,
+    val message: String?,
+    val details: Map<String, String> = emptyMap()
+)
+
+internal fun RagAdminUserAuditEntry.toResponse(): RagAdminUserAuditResponse =
+    RagAdminUserAuditResponse(
+        id = id,
+        timestampEpochMillis = timestampEpochMillis,
+        action = action,
+        actorUsername = actorUsername,
+        actorRole = actorRole,
+        targetUsername = targetUsername,
+        success = success,
+        message = message,
+        details = details
+    )
 
 data class RagAdminIngestResponse(
     val status: String,
@@ -719,17 +856,6 @@ data class RagAdminWebIngestStreamEnvelope(
     val response: RagAdminWebIngestResponse? = null
 )
 
-data class RagAdminSearchRequest(
-    val tenantId: String,
-    val principals: List<String>,
-    val query: String,
-    val topK: Int = 8,
-    val filter: Map<String, String> = emptyMap(),
-    val providerHealthDetail: Boolean = true,
-    val recentProviderWindowMillis: Long? = null,
-    val diagnosticScoreThreshold: Double = Double.NEGATIVE_INFINITY,
-    val diagnosticMaxSamples: Int = 5
-)
 
 data class RagAdminSearchResponse(
     val tenantId: String,
@@ -738,7 +864,8 @@ data class RagAdminSearchResponse(
     val telemetry: RagAdminSearchTelemetryResponse,
     val providerTelemetry: ProviderTelemetryResponse,
     val recentProviderWindowMillis: Long? = null,
-    val recentProviderTelemetry: ProviderTelemetryResponse? = null
+    val recentProviderTelemetry: ProviderTelemetryResponse? = null,
+    val exactMatchDebug: RagAdminExactMatchDebugResponse? = null
 )
 
 data class RagAdminSearchHitResponse(
@@ -752,6 +879,23 @@ data class RagAdminSearchHitResponse(
     val offsetStart: Int?,
     val offsetEnd: Int?,
     val metadata: Map<String, String>
+)
+
+data class RagAdminExactMatchDebugResponse(
+    val enabled: Boolean,
+    val compareMode: String,
+    val combineMode: String,
+    val queryTokens: List<String>,
+    val matchedHitCount: Int,
+    val filteredHitCount: Int,
+    val hits: List<RagAdminExactMatchHitDebugResponse>
+)
+
+data class RagAdminExactMatchHitDebugResponse(
+    val docId: String,
+    val chunkId: String,
+    val matchedTokens: List<String>,
+    val candidateTokens: List<String>
 )
 
 data class RagAdminSearchDiagnosticsResponse(
@@ -964,4 +1108,211 @@ private fun formatHitRate(hitCount: Long, missCount: Long): Double {
     val total = hitCount + missCount
     if (total == 0L) return 0.0
     return hitCount.toDouble() * 100.0 / total.toDouble()
+}
+
+private fun RagAdminSearchResponse.suppressWeakMatches(
+    finalConfidenceThreshold: Double,
+    topHitScoreThreshold: Double
+): RagAdminSearchResponse {
+    val topHitScore = hits.maxOfOrNull { it.score } ?: 0.0
+    val finalConfidence = telemetry.finalConfidence
+    val belowConfidence = finalConfidence != null && finalConfidence < finalConfidenceThreshold
+    val belowScore = hits.isNotEmpty() && topHitScore < topHitScoreThreshold
+    if (!belowConfidence || !belowScore) {
+        return this
+    }
+
+    val reason = buildString {
+        append("no sufficiently strong matches found")
+        append(" (finalConfidence=")
+        append(String.format("%.3f", finalConfidence))
+        append(" < ")
+        append(String.format("%.3f", finalConfidenceThreshold))
+        append(", topHitScore=")
+        append(String.format("%.3f", topHitScore))
+        append(" < ")
+        append(String.format("%.3f", topHitScoreThreshold))
+        append(")")
+    }
+    return copy(
+        hits = emptyList(),
+        telemetry = telemetry.copy(notes = telemetry.notes + reason)
+    )
+}
+
+private fun RagAdminSearchResponse.applyExactMatchFilterIfRequested(
+    request: RagAdminSearchRequest
+): RagAdminSearchResponse {
+    if (!request.searchExactMatchOnly) {
+        return this
+    }
+    val mode = resolveExactMatchMode(request.searchExactMatchMode)
+    val query = request.query.trim()
+    if (query.isBlank()) {
+        return this
+    }
+    val queryTokens = tokenizeExactMatchTerms(query, useAnalyzer = true)
+    val hitDebug = mutableListOf<RagAdminExactMatchHitDebugResponse>()
+    val filteredHits = when (mode.compareMode) {
+        "literal" -> {
+            val normalizedQuery = normalizeExactMatchText(query)
+            hits.filter { hit ->
+                val candidateText = normalizeExactMatchText(buildSearchableText(hit))
+                val matched = candidateText.contains(normalizedQuery)
+                if (matched) {
+                    hitDebug.add(
+                        RagAdminExactMatchHitDebugResponse(
+                            docId = hit.docId,
+                            chunkId = hit.chunkId,
+                            matchedTokens = queryTokens.toList(),
+                            candidateTokens = tokenizeExactMatchTerms(buildSearchableText(hit), useAnalyzer = true).toList()
+                        )
+                    )
+                }
+                matched
+            }
+        }
+        else -> {
+            if (queryTokens.isEmpty()) {
+                return this
+            }
+            hits.filter { hit ->
+                val candidateTokens = tokenizeExactMatchTerms(buildSearchableText(hit), useAnalyzer = true)
+                val matchedTokens = queryTokens.filter(candidateTokens::contains)
+                val matched = when (mode.combineMode) {
+                    "or" -> matchedTokens.isNotEmpty()
+                    else -> matchedTokens.size == queryTokens.size
+                }
+                if (matched) {
+                    hitDebug.add(
+                        RagAdminExactMatchHitDebugResponse(
+                            docId = hit.docId,
+                            chunkId = hit.chunkId,
+                            matchedTokens = matchedTokens.sorted(),
+                            candidateTokens = candidateTokens.toList().sorted()
+                        )
+                    )
+                }
+                matched
+            }
+        }
+    }
+    val note = if (filteredHits.isEmpty()) {
+        "exact match mode enabled but no hits matched ${mode.compareMode}/${mode.combineMode}"
+    } else {
+        "exact match mode enabled and ${filteredHits.size} hits matched ${mode.compareMode}/${mode.combineMode}"
+    }
+    return copy(
+        hits = filteredHits,
+        telemetry = telemetry.copy(notes = telemetry.notes + note),
+        exactMatchDebug = RagAdminExactMatchDebugResponse(
+            enabled = true,
+            compareMode = mode.compareMode,
+            combineMode = mode.combineMode,
+            queryTokens = queryTokens.toList().sorted(),
+            matchedHitCount = hitDebug.size,
+            filteredHitCount = filteredHits.size,
+            hits = hitDebug
+        )
+    )
+}
+
+private data class ExactMatchMode(val compareMode: String, val combineMode: String)
+
+private fun resolveExactMatchMode(rawMode: String?): ExactMatchMode {
+    val normalized = rawMode?.trim()?.lowercase().orEmpty()
+    val parts = normalized.split("-", limit = 2).filter { it.isNotBlank() }
+    val compareMode = parts.getOrNull(0)?.takeIf { it == "literal" || it == "nori" || it == "normalized" } ?: "nori"
+    val combineMode = parts.getOrNull(1)?.takeIf { it == "and" || it == "or" } ?: "and"
+    return ExactMatchMode(compareMode, combineMode)
+}
+
+private fun buildSearchableText(hit: RagAdminSearchHitResponse): String = buildString {
+    append(hit.text.orEmpty())
+    append(' ')
+    append(hit.docId)
+    append(' ')
+    append(hit.chunkId)
+    append(' ')
+    append(hit.sourceUri.orEmpty())
+    append(' ')
+    append(hit.metadata.entries.joinToString(" ") { (key, value) -> "$key=$value" })
+}
+
+private fun normalizeExactMatchText(raw: String): String =
+    raw.lowercase()
+        .let { Normalizer.normalize(it, Normalizer.Form.NFKC) }
+        .replace(Regex("[^\\p{L}\\p{Nd}\\uAC00-\\uD7A3]+"), " ")
+        .trim()
+        .replace(Regex("\\s+"), " ")
+
+private fun tokenizeExactMatchTerms(raw: String, useAnalyzer: Boolean): Set<String> {
+    if (!useAnalyzer) {
+        return normalizeExactMatchText(raw)
+            .split(' ')
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .map { normalizeKoreanFallbackToken(it) }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+    val normalizedTokens = mutableSetOf<String>()
+    KoreanAnalyzer().use { analyzer ->
+        analyzer.tokenStream("search", raw).use { tokenStream ->
+            val term = tokenStream.addAttribute(CharTermAttribute::class.java)
+            tokenStream.reset()
+            while (tokenStream.incrementToken()) {
+                val token = term.toString().trim()
+                if (token.isNotBlank()) {
+                    normalizedTokens.add(token)
+                }
+            }
+            tokenStream.end()
+        }
+    }
+    if (normalizedTokens.isEmpty()) {
+        return normalizeExactMatchText(raw)
+            .split(' ')
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .map { normalizeKoreanFallbackToken(it) }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+    return normalizedTokens
+}
+
+private fun normalizeKoreanFallbackToken(token: String): String {
+    var current = token.lowercase()
+    current = current.trim { !it.isLetterOrDigit() && it !in '\uAC00'..'\uD7A3' }
+    if (current.isBlank()) {
+        return current
+    }
+    return stripKoreanSuffixes(current)
+}
+
+private fun stripKoreanSuffixes(token: String): String {
+    val suffixes = listOf(
+        "자마자", "면서", "는데", "지만", "다고", "라고", "하고", "다가", "니까", "네", "죠", "요",
+        "겠다", "했", "했어", "했다", "였", "였다", "었", "었다", "았", "았다", "겠", "다",
+        "고", "자", "기", "서", "면", "며", "니", "는다", "ㄴ다", "는", "ㄴ",
+        "은", "는", "이", "가", "을", "를", "도", "만", "와", "과", "로", "으로", "에", "의",
+        "에서", "에게", "한테", "께", "까지", "부터", "보다", "처럼", "같이", "라도", "마다", "조차", "마저"
+    ).distinctBy { it.length }.sortedByDescending { it.length }
+
+    var current = token
+    var changed = true
+    while (changed) {
+        changed = false
+        for (suffix in suffixes) {
+            if (current.length > suffix.length + 1 && current.endsWith(suffix)) {
+                current = current.dropLast(suffix.length)
+                changed = true
+                break
+            }
+        }
+    }
+    return current
 }

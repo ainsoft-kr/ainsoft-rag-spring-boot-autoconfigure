@@ -25,7 +25,6 @@
         {/if}
       </div>
     </section>
-
     <nav class="nav-menu"></nav>
   </aside>
 

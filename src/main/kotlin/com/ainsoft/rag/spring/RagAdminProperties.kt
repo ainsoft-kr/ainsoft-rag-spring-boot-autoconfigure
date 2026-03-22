@@ -16,11 +16,40 @@ data class RagAdminProperties(
 
 data class RagAdminSecurityProperties(
     val enabled: Boolean = false,
+    val loginPath: String = "",
+    val logoutPath: String = "",
+    val sessionAttributeName: String = "rag-admin-session-user",
+    val users: Map<String, RagAdminUserProperties> = emptyMap(),
+    @Deprecated("Session login is preferred over header tokens")
     val tokenHeaderName: String = "X-Rag-Admin-Token",
+    @Deprecated("Session login is preferred over query tokens")
     val tokenQueryParameter: String = "access_token",
+    @Deprecated("Session login is preferred over static tokens")
     val tokens: Map<String, String> = emptyMap(),
     val featureRoles: Map<String, List<String>> = defaultFeatureRoles()
 )
+
+data class RagAdminUserProperties(
+    val password: String = "",
+    val roles: List<String> = listOf("ADMIN"),
+    val displayName: String? = null
+)
+
+internal fun RagAdminProperties.resolvedLoginPath(): String =
+    resolveAdminPath(security.loginPath, "login")
+
+internal fun RagAdminProperties.resolvedLogoutPath(): String =
+    resolveAdminPath(security.logoutPath, "logout")
+
+private fun RagAdminProperties.resolveAdminPath(explicitPath: String, suffix: String): String {
+    val candidate = explicitPath.trim().takeIf { it.isNotBlank() } ?: "${normalizeAdminPath(basePath)}/$suffix"
+    return normalizeAdminPath(candidate)
+}
+
+private fun normalizeAdminPath(value: String): String {
+    val normalized = if (value.startsWith("/")) value else "/$value"
+    return if (normalized.length > 1) normalized.trimEnd('/') else normalized
+}
 
 private fun defaultFeatureRoles(): Map<String, List<String>> = mapOf(
     "overview" to listOf("ADMIN", "OPS", "AUDITOR"),
@@ -34,6 +63,7 @@ private fun defaultFeatureRoles(): Map<String, List<String>> = mapOf(
     "search-audit" to listOf("ADMIN", "OPS", "AUDITOR"),
     "job-history" to listOf("ADMIN", "OPS", "AUDITOR"),
     "access-security" to listOf("ADMIN"),
+    "users" to listOf("ADMIN"),
     "config" to listOf("ADMIN", "OPS", "AUDITOR"),
     "bulk-operations" to listOf("ADMIN", "OPS")
 )

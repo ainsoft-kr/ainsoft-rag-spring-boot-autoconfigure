@@ -34,13 +34,25 @@ import org.apache.lucene.search.TermQuery
 import org.apache.lucene.store.FSDirectory
 import org.apache.lucene.index.Term
 
+interface RagAdminUserAuditSink {
+    fun recordUserAudit(
+        action: String,
+        actorUsername: String?,
+        actorRole: String?,
+        targetUsername: String,
+        success: Boolean,
+        message: String? = null,
+        details: Map<String, String> = emptyMap()
+    )
+}
+
 class RagAdminService(
     private val engine: RagEngine,
     private val properties: RagProperties,
     private val adminProperties: RagAdminProperties,
     private val ragConfig: RagConfig,
     private val embeddingProvider: EmbeddingProvider
-) {
+) : RagAdminUserAuditSink {
     private val objectMapper = jacksonObjectMapper()
     private val plainTextParser = PlainTextParser()
     private val tikaDocumentParser = TikaDocumentParser()
@@ -48,6 +60,7 @@ class RagAdminService(
     private val searchAudits = ArrayDeque<RagAdminSearchAuditEntry>()
     private val jobHistory = ArrayDeque<RagAdminJobHistoryEntry>()
     private val accessAudits = ArrayDeque<RagAdminAccessAuditEntry>()
+    private val userAudits = ArrayDeque<RagAdminUserAuditEntry>()
     private val providerHistory = ArrayDeque<RagAdminProviderHistoryEntry>()
     private val ingestSnapshotCache = ConcurrentHashMap<String, IngestSnapshot>()
 
@@ -158,6 +171,66 @@ class RagAdminService(
 
     fun listAccessAudits(limit: Int = adminProperties.historyMaxEntries): List<RagAdminAccessAuditEntry> =
         synchronized(accessAudits) { accessAudits.toList().sortedByDescending { it.timestampEpochMillis }.take(limit) }
+
+    override fun recordUserAudit(
+        action: String,
+        actorUsername: String?,
+        actorRole: String?,
+        targetUsername: String,
+        success: Boolean,
+        message: String?,
+        details: Map<String, String>
+    ) {
+        append(userAudits, adminProperties.historyMaxEntries) {
+            RagAdminUserAuditEntry(
+                id = UUID.randomUUID().toString(),
+                timestampEpochMillis = System.currentTimeMillis(),
+                action = action,
+                actorUsername = actorUsername,
+                actorRole = actorRole,
+                targetUsername = targetUsername,
+                success = success,
+                message = message,
+                details = details
+            )
+        }
+    }
+
+    fun listUserAudits(
+        limit: Int = adminProperties.historyMaxEntries,
+        offset: Int = 0,
+        action: String? = null,
+        query: String? = null,
+        fromEpochMillis: Long? = null,
+        toEpochMillis: Long? = null
+    ): List<RagAdminUserAuditEntry> {
+        val normalizedAction = action?.trim()?.uppercase()?.takeIf { it.isNotBlank() && it != "ALL" }
+        val normalizedQuery = query?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+        val items = synchronized(userAudits) {
+            userAudits.toList()
+                .sortedByDescending { it.timestampEpochMillis }
+                .asSequence()
+                .filter { entry -> normalizedAction == null || entry.action == normalizedAction }
+                .filter { entry -> fromEpochMillis == null || entry.timestampEpochMillis >= fromEpochMillis }
+                .filter { entry -> toEpochMillis == null || entry.timestampEpochMillis <= toEpochMillis }
+                .filter { entry ->
+                    normalizedQuery == null || listOf(
+                        entry.action,
+                        entry.actorUsername,
+                        entry.actorRole,
+                        entry.targetUsername,
+                        entry.message,
+                        entry.details.entries.joinToString(" ") { "${it.key}=${it.value}" }
+                    ).filterNotNull().joinToString(" ").lowercase().contains(normalizedQuery)
+                }
+                .toList()
+        }
+        if (limit <= 0) {
+            return emptyList()
+        }
+        val safeOffset = offset.coerceAtLeast(0)
+        return items.drop(safeOffset).take(limit)
+    }
 
     fun recordProviderSnapshot(source: String) {
         append(providerHistory, adminProperties.providerHistoryMaxEntries) {
@@ -323,8 +396,9 @@ class RagAdminService(
         val effectiveAcl = request.acl ?: detail.acl
         val effectiveMetadata = request.metadata ?: detail.metadata
         val effectiveSourceUri = request.sourceUri ?: detail.sourceUris.firstOrNull()
-        val parsed = if (!request.text.isNullOrBlank()) {
-            plainTextParser.parseText(request.text, sourceUri = effectiveSourceUri)
+        val requestedText = request.text
+        val parsed = if (!requestedText.isNullOrBlank()) {
+            plainTextParser.parseText(requestedText, sourceUri = effectiveSourceUri)
         } else {
             require(!effectiveSourceUri.isNullOrBlank()) { "sourceUri or text is required for reindex" }
             parseFromSourceUri(effectiveSourceUri, request.charset)
@@ -374,8 +448,8 @@ class RagAdminService(
         val normalizedTenantId = normalizeIdentifier(request.tenantId, "tenantId")
         require(request.urls.isNotEmpty()) { "urls must not be empty" }
         require(request.acl.isNotEmpty()) { "acl must not be empty" }
-        require(request.maxPages > 0) { "maxPages must be greater than zero" }
-        require(request.maxDepth >= 0) { "maxDepth must not be negative" }
+        val effectiveMaxPages = (request.maxPages ?: 25).coerceAtLeast(1)
+        val effectiveMaxDepth = (request.maxDepth ?: 1).coerceAtLeast(0)
 
         val normalizedUrls = request.urls.map { normalizeWebUrl(it) }
         val jobId = startJob(
@@ -387,8 +461,8 @@ class RagAdminService(
                 "tenantId" to normalizedTenantId,
                 "urls" to normalizedUrls,
                 "allowedDomains" to request.allowedDomains,
-                "maxPages" to request.maxPages,
-                "maxDepth" to request.maxDepth,
+                "maxPages" to effectiveMaxPages,
+                "maxDepth" to effectiveMaxDepth,
                 "sameHostOnly" to request.sameHostOnly,
                 "incrementalIngest" to request.incrementalIngest
             )
@@ -398,8 +472,8 @@ class RagAdminService(
             val crawl = webCrawler.crawl(
                 seedUrls = normalizedUrls,
                 allowedDomains = request.allowedDomains,
-                maxPages = request.maxPages,
-                maxDepth = request.maxDepth,
+                maxPages = effectiveMaxPages,
+                maxDepth = effectiveMaxDepth,
                 sameHostOnly = request.sameHostOnly,
                 charset = Charset.forName(request.charset),
                 timeout = Duration.ofMillis(resolvedProfile.timeoutMillis ?: properties.sourceLoadTimeoutMillis),
@@ -848,12 +922,15 @@ class RagAdminService(
         return result.toResponse()
     }
 
-    fun accessSecurity(currentRole: String?): RagAdminAccessSecurityResponse =
+    fun accessSecurity(access: RagAdminAccessContext?): RagAdminAccessSecurityResponse =
         RagAdminAccessSecurityResponse(
             securityEnabled = adminProperties.security.enabled,
-            currentRole = currentRole,
-            tokenHeaderName = adminProperties.security.tokenHeaderName,
-            tokenQueryParameter = adminProperties.security.tokenQueryParameter,
+            authenticated = access?.authenticated ?: !adminProperties.security.enabled,
+            currentUser = access?.username,
+            currentRole = access?.role,
+            currentRoles = access?.roles?.sorted().orEmpty(),
+            loginPath = adminProperties.resolvedLoginPath(),
+            logoutPath = adminProperties.resolvedLogoutPath(),
             featureRoles = adminProperties.security.featureRoles,
             recentAccessAudits = listAccessAudits()
         )
@@ -1205,14 +1282,6 @@ data class RagAdminSourcePreviewResponse(
     val preview: String
 )
 
-data class RagAdminDocumentReindexRequest(
-    val text: String? = null,
-    val sourceUri: String? = null,
-    val metadata: Map<String, String>? = null,
-    val acl: List<String>? = null,
-    val charset: String = "UTF-8"
-)
-
 data class RagAdminTenantListResponse(
     val items: List<RagAdminTenantSummary>,
     val snapshots: List<RagAdminSnapshotSummary>
@@ -1296,6 +1365,18 @@ data class RagAdminAccessAuditEntry(
     val message: String?
 )
 
+data class RagAdminUserAuditEntry(
+    val id: String,
+    val timestampEpochMillis: Long,
+    val action: String,
+    val actorUsername: String?,
+    val actorRole: String?,
+    val targetUsername: String,
+    val success: Boolean,
+    val message: String?,
+    val details: Map<String, String> = emptyMap()
+)
+
 data class RagAdminProviderHistoryEntry(
     val timestampEpochMillis: Long,
     val source: String,
@@ -1319,9 +1400,12 @@ data class RagAdminProviderHistoryResponse(
 
 data class RagAdminAccessSecurityResponse(
     val securityEnabled: Boolean,
+    val authenticated: Boolean,
+    val currentUser: String?,
     val currentRole: String?,
-    val tokenHeaderName: String,
-    val tokenQueryParameter: String,
+    val currentRoles: List<String>,
+    val loginPath: String,
+    val logoutPath: String,
     val featureRoles: Map<String, List<String>>,
     val recentAccessAudits: List<RagAdminAccessAuditEntry>
 )
@@ -1329,33 +1413,6 @@ data class RagAdminAccessSecurityResponse(
 data class RagAdminConfigInspectorResponse(
     val rag: Map<String, Any?>,
     val admin: Map<String, Any?>
-)
-
-data class RagAdminBulkTextIngestRequest(
-    val tenantId: String,
-    val documents: List<RagAdminBulkTextDocument>,
-    val incrementalIngest: Boolean = true
-)
-
-data class RagAdminBulkTextDocument(
-    val docId: String,
-    val text: String,
-    val acl: List<String>,
-    val metadata: Map<String, String> = emptyMap(),
-    val sourceUri: String? = null,
-    val page: Int? = null,
-    val pageMarkers: List<RagAdminPageMarkerRequest>? = null
-)
-
-data class RagAdminBulkDeleteRequest(
-    val tenantId: String,
-    val docIds: List<String>
-)
-
-data class RagAdminBulkMetadataPatchRequest(
-    val tenantId: String,
-    val docIds: List<String>,
-    val metadata: Map<String, String>
 )
 
 data class RagAdminBulkItemResult(

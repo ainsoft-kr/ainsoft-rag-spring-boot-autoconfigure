@@ -52,7 +52,10 @@ dependencies {
 
     api("org.springframework.boot:spring-boot-autoconfigure:4.0.4")
     compileOnly("org.springframework.boot:spring-boot-starter-web:4.0.4")
+    compileOnly("org.springframework.boot:spring-boot-starter-data-jpa:4.0.4")
+    implementation("org.mindrot:jbcrypt:0.4")
     implementation("org.apache.lucene:lucene-core:10.3.2")
+    implementation("org.apache.lucene:lucene-analysis-nori:10.3.2")
     implementation("org.apache.lucene:lucene-queryparser:10.3.2")
     implementation("com.fleeksoft.ksoup:ksoup:0.2.6")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")

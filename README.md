@@ -155,6 +155,8 @@ rag:
 ```
 
 관리자 UI 정적 자산은 이 저장소의 SvelteKit frontend에서 생성됩니다.
+기본 보안 모드는 세션 로그인이며, `/rag-admin/login` 과 `/rag-admin/logout` 경로를 사용합니다.
+로그인 계정은 `rag.admin.security.users` 로 초기 시드되며, JPA가 사용 가능하면 `rag_admin_users` 테이블에 BCrypt 해시로 저장됩니다.
 
 ## Admin Feature Model
 
@@ -173,6 +175,7 @@ rag:
 - config
 - bulk-operations
 - access-security
+- users
 
 기본 역할 매핑도 함께 제공됩니다.
 
@@ -180,7 +183,7 @@ rag:
 - `OPS`
 - `AUDITOR`
 
-예를 들어 `access-security`는 기본적으로 `ADMIN`만 접근 가능하고, `overview`, `provider-history`, `search-audit`, `job-history`, `config`는 `AUDITOR`도 접근할 수 있습니다.
+예를 들어 `access-security`와 `users`는 기본적으로 `ADMIN`만 접근 가능하고, `overview`, `provider-history`, `search-audit`, `job-history`, `config`는 `AUDITOR`도 접근할 수 있습니다.
 
 예시:
 
@@ -189,12 +192,16 @@ rag:
   admin:
     security:
       enabled: true
-      tokenHeaderName: X-Rag-Admin-Token
-      tokenQueryParameter: access_token
-      tokens:
-        admin-token: ADMIN
-        ops-token: OPS
-        audit-token: AUDITOR
+      users:
+        admin:
+          password: change-me
+          roles: [ADMIN]
+        ops:
+          password: change-me
+          roles: [OPS]
+        audit:
+          password: change-me
+          roles: [AUDITOR]
       featureRoles:
         overview: [ADMIN, OPS, AUDITOR]
         search: [ADMIN, OPS, AUDITOR]
@@ -209,6 +216,7 @@ rag:
         config: [ADMIN, OPS, AUDITOR]
         bulk-operations: [ADMIN, OPS]
         access-security: [ADMIN]
+        users: [ADMIN]
 ```
 
 ## Operational API Surface
@@ -222,7 +230,7 @@ rag:
 - tenants list / detail / delete
 - operations snapshot / restore / optimize / rebuild-metadata
 - provider-history / search-audit / job-history
-- access-security / config
+- access-security / users / config
 
 즉, 이 모듈은 "엔진을 Spring에 연결하는 glue code"이면서 동시에 운영 관리면을 노출하는 adapter layer입니다.
 

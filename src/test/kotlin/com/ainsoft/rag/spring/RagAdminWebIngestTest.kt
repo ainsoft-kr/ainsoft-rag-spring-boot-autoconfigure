@@ -221,7 +221,12 @@ class RagAdminWebIngestTest {
                 override fun embed(texts: List<String>): List<FloatArray> = texts.map { floatArrayOf(0f) }
             },
             adminService = service,
-            securityService = RagAdminSecurityService(RagAdminProperties(), service)
+            securityService = RagAdminSecurityService(RagAdminProperties(), service, InMemoryRagAdminAccountStore()),
+            accountManagementService = RagAdminAccountManagementService(
+                RagAdminProperties(),
+                InMemoryRagAdminAccountStore(),
+                service
+            )
         )
         val baseUrl = "http://127.0.0.1:${server.address.port}/"
         val response = controller.webIngestStream(
@@ -374,7 +379,12 @@ class RagAdminWebIngestTest {
                 override fun embed(texts: List<String>): List<FloatArray> = texts.map { floatArrayOf(0f) }
             },
             adminService = service,
-            securityService = RagAdminSecurityService(RagAdminProperties(), service)
+            securityService = RagAdminSecurityService(RagAdminProperties(), service, InMemoryRagAdminAccountStore()),
+            accountManagementService = RagAdminAccountManagementService(
+                RagAdminProperties(),
+                InMemoryRagAdminAccountStore(),
+                service
+            )
         )
 
     private class RecordingEngine : RagEngine {

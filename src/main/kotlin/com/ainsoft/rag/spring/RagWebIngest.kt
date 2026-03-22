@@ -13,21 +13,6 @@ import java.security.MessageDigest
 import java.time.Duration
 import java.util.ArrayDeque
 
-data class RagAdminWebIngestRequest(
-    val tenantId: String,
-    val urls: List<String>,
-    val acl: List<String>,
-    val metadata: Map<String, String> = emptyMap(),
-    val allowedDomains: List<String> = emptyList(),
-    val respectRobotsTxt: Boolean = true,
-    val incrementalIngest: Boolean = true,
-    val userAgent: String = "AinsoftRagBot/1.0",
-    val maxPages: Int = 25,
-    val maxDepth: Int = 1,
-    val sameHostOnly: Boolean = true,
-    val charset: String = "UTF-8"
-)
-
 data class RagAdminWebIngestResponse(
     val status: String,
     val tenantId: String,

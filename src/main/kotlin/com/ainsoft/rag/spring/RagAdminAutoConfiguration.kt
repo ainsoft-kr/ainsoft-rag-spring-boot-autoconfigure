@@ -31,6 +31,13 @@ class RagAdminAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    fun ragAdminAuthController(
+        properties: RagAdminProperties,
+        securityService: RagAdminSecurityService
+    ): RagAdminAuthController = RagAdminAuthController(properties, securityService)
+
+    @Bean
+    @ConditionalOnMissingBean
     fun ragAdminService(
         engine: RagEngine,
         properties: RagProperties,
@@ -49,8 +56,9 @@ class RagAdminAutoConfiguration {
     @ConditionalOnMissingBean
     fun ragAdminSecurityService(
         adminProperties: RagAdminProperties,
-        adminService: RagAdminService
-    ): RagAdminSecurityService = RagAdminSecurityService(adminProperties, adminService)
+        adminService: RagAdminService,
+        accountStore: RagAdminAccountStore
+    ): RagAdminSecurityService = RagAdminSecurityService(adminProperties, adminService, accountStore)
 
     @Bean
     @ConditionalOnMissingBean
@@ -75,17 +83,38 @@ class RagAdminAutoConfiguration {
         ragConfig: RagConfig,
         embeddingProvider: EmbeddingProvider,
         adminService: RagAdminService,
-        securityService: RagAdminSecurityService
+        securityService: RagAdminSecurityService,
+        accountManagementService: RagAdminAccountManagementService
     ): RagAdminApiController = RagAdminApiController(
         engine = engine,
         properties = properties,
         ragConfig = ragConfig,
         embeddingProvider = embeddingProvider,
         adminService = adminService,
-        securityService = securityService
+        securityService = securityService,
+        accountManagementService = accountManagementService
     )
 
     @Bean
     @ConditionalOnMissingBean
     fun ragAdminExceptionHandler(): RagAdminExceptionHandler = RagAdminExceptionHandler()
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun ragAdminAccountStore(): RagAdminAccountStore = InMemoryRagAdminAccountStore()
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun ragAdminAccountBootstrapper(
+        adminProperties: RagAdminProperties,
+        accountStore: RagAdminAccountStore
+    ): RagAdminAccountBootstrapper = RagAdminAccountBootstrapper(adminProperties, accountStore)
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun ragAdminAccountManagementService(
+        adminProperties: RagAdminProperties,
+        accountStore: RagAdminAccountStore,
+        adminService: RagAdminService
+    ): RagAdminAccountManagementService = RagAdminAccountManagementService(adminProperties, accountStore, adminService)
 }

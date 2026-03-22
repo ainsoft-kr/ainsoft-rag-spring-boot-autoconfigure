@@ -19,6 +19,36 @@
           <label>Principals<input id="search-principals" value="group:admin" /></label>
           <label>Top K<input id="search-topk" type="number" value="5" /></label>
         </div>
+        <div class="dual">
+          <label>Min Final Confidence<input id="search-final-confidence" type="number" step="0.01" value="0.45" /></label>
+          <label>Min Top Hit Score<input id="search-top-hit-score" type="number" step="0.01" value="0.03" /></label>
+        </div>
+        <div class="dual">
+          <button class="secondary" type="button" data-threshold-preset="strict">Strict</button>
+          <button class="secondary" type="button" data-threshold-preset="balanced">Balanced</button>
+        </div>
+        <div class="dual">
+          <button class="secondary" type="button" data-threshold-preset="permissive">Permissive</button>
+          <label class="toggle-row">
+            <input id="search-exact-match" type="checkbox" />
+            <span>Exact term match</span>
+          </label>
+        </div>
+        <div class="dual">
+          <label>Compare As
+            <select id="search-exact-compare">
+              <option value="literal">Literal</option>
+              <option value="nori" selected>Nori stem/lemma</option>
+            </select>
+          </label>
+          <label>Combine Tokens
+            <select id="search-exact-combine">
+              <option value="and" selected>AND</option>
+              <option value="or">OR</option>
+            </select>
+          </label>
+        </div>
+        <div class="status-chip" id="search-threshold-summary">finalConfidence 0.45+, topHitScore 0.03+, exact match off, compare nori, combine and</div>
         <label>Query<input id="search-query" value="hybrid retrieval" /></label>
         <label>Metadata Filter (`key=value`)<textarea id="search-filter" placeholder="surface=admin"></textarea></label>
         <div class="actions">
@@ -34,6 +64,7 @@
       <div class="feature-grid">
         <div class="feature-card"><h3>Query</h3><p>질의와 metadata filter를 함께 보내 hybrid retrieval 조건을 실험합니다.</p></div>
         <div class="feature-card"><h3>Diagnostics</h3><p>ACL 적용 전후 lexical/vector 매치를 비교합니다.</p></div>
+        <div class="feature-card"><h3>Thresholds</h3><p>finalConfidence와 top hit score가 낮으면 결과를 아예 숨깁니다. Exact term mode는 원형 비교와 AND/OR 결합을 지원합니다.</p></div>
         <div class="feature-card"><h3>Providers</h3><p>fallback 이력과 최근 telemetry 창을 함께 추적합니다.</p></div>
       </div>
     </article>
@@ -60,6 +91,19 @@
     </article>
 
     <article class="panel full">
+      <div class="panel-header">
+        <div><h2>Exact Match Debug</h2><p>exact term mode에서 어떤 토큰이 비교되고 어떤 hit가 통과했는지 확인합니다.</p></div>
+        <div class="actions">
+          <button class="secondary" type="button" id="btn-copy-exact-query">Copy Query Tokens</button>
+          <button class="secondary" type="button" id="btn-copy-exact-hits">Copy Hit Tokens</button>
+          <button class="secondary" type="button" id="btn-download-exact-json">Download JSON</button>
+          <button class="secondary" type="button" id="btn-download-exact-csv">Download CSV</button>
+        </div>
+      </div>
+      <div id="search-exact-debug-cards"></div>
+    </article>
+
+    <article class="panel full">
       <div class="panel-header"><div><h2>Search Streams</h2><p>검색 응답과 진단 응답을 나란히 표시합니다.</p></div></div>
       <div class="grid">
         <div class="stack"><strong>Search</strong><pre id="output-search">{'{}'}</pre></div>
@@ -68,4 +112,3 @@
     </article>
   </section>
 </AdminPage>
-

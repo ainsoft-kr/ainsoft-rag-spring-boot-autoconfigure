@@ -50,6 +50,8 @@ data class RagProperties(
     val correctiveMinConfidence: Double = 0.08,
     val correctiveMinResultsBeforeSkip: Int = 3,
     val correctiveExpandedCandidateMultiplier: Int = 2,
+    val searchNoMatchMinFinalConfidence: Double = 0.45,
+    val searchNoMatchMinTopHitScore: Double = 0.03,
     val queryRewriteEnabled: Boolean = true,
     val queryRewriterType: String = "heuristic",
     val queryRewriteApiBaseUrl: String = "https://api.openai.com/v1",

@@ -1,1 +1,0 @@
-import{W as e}from"./2SlX_21l.js";e();

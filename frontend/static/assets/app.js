@@ -6,8 +6,9 @@
     securityEnabled: false,
     currentRole: "ADMIN",
     allowedFeatures: [],
-    tokenHeaderName: "X-Rag-Admin-Token",
-    tokenQueryParameter: "access_token"
+    currentUser: "ADMIN",
+    loginPath: "/rag-admin/login",
+    logoutPath: "/rag-admin/logout"
   };
 
   const routes = [
@@ -23,7 +24,8 @@
     { route: "bulk-operations", feature: "bulk-operations", label: "Bulk Ops", caption: "Batch changes", section: "Ingest", board: "Batch Operations" },
     { route: "tenants", feature: "tenants", label: "Tenants & Index Ops", caption: "Snapshot and optimize", section: "Operations", board: "Tenant Operations" },
     { route: "config", feature: "config", label: "Config", caption: "Read-only settings", section: "Operations", board: "Configuration Board" },
-    { route: "access-security", feature: "access-security", label: "Access & Security", caption: "Roles and audit", section: "Operations", board: "Security Board" }
+    { route: "access-security", feature: "access-security", label: "Access & Security", caption: "Roles and audit", section: "Operations", board: "Security Board" },
+    { route: "users", feature: "users", label: "Users", caption: "Accounts and passwords", section: "Operations", board: "User Vault" }
   ];
   const storageKey = "rag-admin-shared-context";
 
@@ -48,6 +50,21 @@
       }, {});
   }
 
+  function parseOptionalNumber(value) {
+    const raw = String(value ?? "").trim();
+    if (!raw) {
+      return null;
+    }
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function formatThresholdSummary(finalConfidence, topHitScore, exactMatchOnly) {
+    const compareMode = document.getElementById("search-exact-compare")?.value || "nori";
+    const combineMode = document.getElementById("search-exact-combine")?.value || "and";
+    return `finalConfidence ${Number(finalConfidence).toFixed(2)}+, topHitScore ${Number(topHitScore).toFixed(2)}+, exact match ${exactMatchOnly ? "on" : "off"}, compare ${compareMode}, combine ${combineMode}`;
+  }
+
   function formatMap(value) {
     return Object.entries(value || {})
       .map(([key, entryValue]) => `${key}=${entryValue}`)
@@ -63,6 +80,39 @@
       .replaceAll("'", "&#39;");
   }
 
+  function escapeRegExp(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function highlightTokens(text, tokens, className = "exact-match-token") {
+    let output = escapeHtml(text || "");
+    (tokens || [])
+      .filter(Boolean)
+      .sort((a, b) => String(b).length - String(a).length)
+      .forEach((token) => {
+        const safeToken = escapeHtml(token);
+        const re = new RegExp(escapeRegExp(safeToken), "gi");
+        output = output.replace(re, (match) => `<mark class="${className}">${match}</mark>`);
+      });
+    return output;
+  }
+
+  function downloadTextFile(filename, content, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+  }
+
+  function uniqueSortedTokens(tokens) {
+    return Array.from(new Set((tokens || []).map((token) => String(token || "").trim()).filter(Boolean))).sort();
+  }
+
   function parseJsonInput(id, fallback) {
     const value = document.getElementById(id)?.value?.trim();
     if (!value) {
@@ -71,30 +121,21 @@
     return JSON.parse(value);
   }
 
-  function queryToken() {
-    return new URLSearchParams(window.location.search).get(config.tokenQueryParameter) || "";
-  }
-
   function defaultContext() {
     return {
       tenantId: "tenant-admin",
-      recentProviderWindowMillis: config.defaultRecentProviderWindowMillis,
-      accessToken: queryToken()
+      recentProviderWindowMillis: config.defaultRecentProviderWindowMillis
     };
   }
 
   function normalizeContext(input) {
-    const token = typeof input.accessToken === "string" && input.accessToken.trim()
-      ? input.accessToken.trim()
-      : queryToken();
     return {
       tenantId: typeof input.tenantId === "string" && input.tenantId.trim()
         ? input.tenantId.trim()
         : "tenant-admin",
       recentProviderWindowMillis: Number(
         input.recentProviderWindowMillis || config.defaultRecentProviderWindowMillis
-      ),
-      accessToken: token
+      )
     };
   }
 
@@ -125,8 +166,7 @@
     return saveContext({
       tenantId: contextInput("tenantId")?.value || existing.tenantId,
       recentProviderWindowMillis:
-        contextInput("recentProviderWindowMillis")?.value || existing.recentProviderWindowMillis,
-      accessToken: contextInput("accessToken")?.value || existing.accessToken
+        contextInput("recentProviderWindowMillis")?.value || existing.recentProviderWindowMillis
     });
   }
 
@@ -152,6 +192,7 @@
     const api = document.getElementById("badge-api");
     const windowBadge = document.getElementById("badge-window");
     const roleBadge = document.getElementById("badge-role");
+    const userBadge = document.getElementById("badge-user");
     if (base) base.textContent = `UI ${config.basePath}`;
     if (api) api.textContent = `API ${config.apiBasePath}`;
     if (windowBadge) {
@@ -162,6 +203,9 @@
         ? `Role ${config.currentRole || "ANONYMOUS"}`
         : "Security Disabled";
     }
+    if (userBadge) {
+      userBadge.textContent = config.currentUser || "ANONYMOUS";
+    }
     updateShellMeta();
   }
 
@@ -170,13 +214,7 @@
   }
 
   function decoratePath(path) {
-    const token = loadContext().accessToken;
-    if (!token) {
-      return path;
-    }
-    const url = new URL(path, window.location.origin);
-    url.searchParams.set(config.tokenQueryParameter, token);
-    return `${url.pathname}${url.search}`;
+    return path;
   }
 
   function routeUrl(route) {
@@ -236,9 +274,11 @@
 
   function updateShellMeta() {
     const context = loadContext();
+    setText("shell-user", config.currentUser || "ANONYMOUS");
     setText("shell-role", config.currentRole || "ANONYMOUS");
     setText("shell-tenant", context.tenantId || "-");
     setText("shell-window", `${context.recentProviderWindowMillis || 0} ms`);
+    setText("topbar-user", config.currentUser || "ANONYMOUS");
     setText("topbar-role", config.currentRole || "ANONYMOUS");
     setText("topbar-tenant", context.tenantId || "-");
     setText("topbar-window", `${context.recentProviderWindowMillis || 0} ms`);
@@ -270,9 +310,11 @@
         <div class="topbar-title">${route.board} / ${route.label}</div>
       </div>
       <div class="topbar-meta">
+        <span class="topbar-pill">User <strong id="topbar-user"></strong></span>
         <span class="topbar-pill">Tenant <strong id="topbar-tenant"></strong></span>
         <span class="topbar-pill">Role <strong id="topbar-role"></strong></span>
         <span class="topbar-pill">Window <strong id="topbar-window"></strong></span>
+        <a class="topbar-pill topbar-link" href="${config.logoutPath}">Logout</a>
       </div>
     `;
 
@@ -339,17 +381,11 @@
 
   async function request(path, options) {
     const url = new URL(`${config.apiBasePath}${path}`, window.location.origin);
-    const context = loadContext();
-    if (context.accessToken) {
-      url.searchParams.set(config.tokenQueryParameter, context.accessToken);
-    }
     const response = await fetch(url.toString(), {
+      credentials: "same-origin",
       headers: {
         Accept: "application/json",
         ...(options?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-        ...(context.accessToken && config.tokenHeaderName
-          ? { [config.tokenHeaderName]: context.accessToken }
-          : {}),
         ...(options?.headers || {})
       },
       ...options
@@ -530,6 +566,13 @@
     if (node) {
       node.value = value == null ? "" : String(value);
     }
+  }
+
+  function formatDateInputValue(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   }
 
   function setText(id, value) {
@@ -1128,6 +1171,50 @@
   }
 
   function initSearch() {
+    let lastSearchResponse = null;
+
+    function currentThresholdValues() {
+      return {
+        finalConfidence: parseOptionalNumber(document.getElementById("search-final-confidence")?.value) ?? 0.45,
+        topHitScore: parseOptionalNumber(document.getElementById("search-top-hit-score")?.value) ?? 0.03,
+        exactMatchOnly: Boolean(document.getElementById("search-exact-match")?.checked),
+        compareMode: document.getElementById("search-exact-compare")?.value || "nori",
+        combineMode: document.getElementById("search-exact-combine")?.value || "and"
+      };
+    }
+
+    function updateThresholdSummary() {
+      const summary = document.getElementById("search-threshold-summary");
+      if (!summary) {
+        return;
+      }
+      const thresholds = currentThresholdValues();
+      summary.textContent = formatThresholdSummary(
+        thresholds.finalConfidence,
+        thresholds.topHitScore,
+        thresholds.exactMatchOnly
+      );
+    }
+
+    function applyThresholdPreset(name) {
+      const finalConfidence = document.getElementById("search-final-confidence");
+      const topHitScore = document.getElementById("search-top-hit-score");
+      if (!finalConfidence || !topHitScore) {
+        return;
+      }
+      if (name === "strict") {
+        finalConfidence.value = "0.55";
+        topHitScore.value = "0.05";
+      } else if (name === "balanced") {
+        finalConfidence.value = "0.45";
+        topHitScore.value = "0.03";
+      } else if (name === "permissive") {
+        finalConfidence.value = "0.25";
+        topHitScore.value = "0.01";
+      }
+      updateThresholdSummary();
+    }
+
     function renderSearchSummary(response) {
       const telemetry = response.telemetry || {};
       renderAnalyticsCards("search-analytics", [
@@ -1205,6 +1292,48 @@
       );
     }
 
+    function renderExactMatchDebug(response) {
+      const debug = response?.exactMatchDebug;
+      if (!debug) {
+        renderDataCards("search-exact-debug-cards", []);
+        return;
+      }
+      renderDataCards(
+        "search-exact-debug-cards",
+        [
+          {
+            title: "Mode",
+            meta: `${debug.compareMode}/${debug.combineMode}`,
+            body: `enabled=${debug.enabled} · matched hits=${debug.matchedHitCount} · filtered hits=${debug.filteredHitCount}`,
+            chips: ["exact mode", debug.compareMode, debug.combineMode]
+          },
+          {
+            title: "Query Tokens",
+            meta: "Normalized terms",
+            body: debug.queryTokens.join(" ") || "(none)",
+            chips: debug.queryTokens.length ? debug.queryTokens.map((token) => `query:${token}`) : ["-"]
+          },
+          ...(debug.hits || []).slice(0, 6).map((hit) => ({
+            title: `${hit.docId} / ${hit.chunkId}`,
+            meta: `matched ${hit.matchedTokens.length}`,
+            bodyHtml:
+              `<div>${highlightTokens(hit.candidateTokens.slice(0, 20).join(" "), hit.matchedTokens)}</div>` +
+              `<div class="diff-summary">matched: ${escapeHtml(hit.matchedTokens.join(", ") || "-")}</div>`,
+            chips: hit.matchedTokens.length ? hit.matchedTokens.map((token) => `match:${token}`) : ["no match"]
+          }))
+        ]
+      );
+    }
+
+    function exactMatchTokensFromResponse(response) {
+      const debug = response?.exactMatchDebug;
+      return {
+        queryTokens: debug?.queryTokens || [],
+        hitTokens: uniqueSortedTokens((debug?.hits || []).flatMap((hit) => hit.matchedTokens || [])),
+        debug
+      };
+    }
+
     function searchPayload() {
       return {
         tenantId: currentTenant(),
@@ -1212,6 +1341,10 @@
         query: document.getElementById("search-query")?.value?.trim() || "",
         topK: Number(document.getElementById("search-topk")?.value || 5),
         filter: parseMap(document.getElementById("search-filter")?.value),
+        searchNoMatchMinFinalConfidence: parseOptionalNumber(document.getElementById("search-final-confidence")?.value),
+        searchNoMatchMinTopHitScore: parseOptionalNumber(document.getElementById("search-top-hit-score")?.value),
+        searchExactMatchOnly: Boolean(document.getElementById("search-exact-match")?.checked),
+        searchExactMatchMode: `${document.getElementById("search-exact-compare")?.value || "nori"}-${document.getElementById("search-exact-combine")?.value || "and"}`,
         providerHealthDetail: true,
         recentProviderWindowMillis: currentWindow() > 0 ? currentWindow() : null
       };
@@ -1222,9 +1355,17 @@
         method: "POST",
         body: JSON.stringify(searchPayload())
       });
+      lastSearchResponse = response;
       renderJson("output-search", response);
       renderSearchSummary(response);
-      setNotice("search-notice", `search completed with ${response.hits.length} hits`, false);
+      renderExactMatchDebug(response);
+      setNotice(
+        "search-notice",
+        response.hits.length
+          ? `search completed with ${response.hits.length} hits`
+          : "no sufficiently strong matches found",
+        response.hits.length === 0
+      );
     }
 
     async function runDiagnostics() {
@@ -1232,7 +1373,9 @@
         method: "POST",
         body: JSON.stringify(searchPayload())
       });
+      lastSearchResponse = null;
       renderJson("output-diagnostics", response);
+      renderExactMatchDebug(null);
       renderDataCards(
         "search-diagnostic-cards",
         [
@@ -1270,6 +1413,77 @@
 
     document.getElementById("btn-search")?.addEventListener("click", () => run("search-notice", runSearch));
     document.getElementById("btn-diagnose")?.addEventListener("click", () => run("search-notice", runDiagnostics));
+    document.querySelectorAll("[data-threshold-preset]")?.forEach((button) => {
+      button.addEventListener("click", () => applyThresholdPreset(button.getAttribute("data-threshold-preset") || "balanced"));
+    });
+    document.getElementById("search-final-confidence")?.addEventListener("input", updateThresholdSummary);
+    document.getElementById("search-top-hit-score")?.addEventListener("input", updateThresholdSummary);
+    document.getElementById("search-exact-match")?.addEventListener("change", updateThresholdSummary);
+    document.getElementById("search-exact-compare")?.addEventListener("change", updateThresholdSummary);
+    document.getElementById("search-exact-combine")?.addEventListener("change", updateThresholdSummary);
+    document.getElementById("btn-copy-exact-query")?.addEventListener("click", async () => {
+      const { queryTokens } = exactMatchTokensFromResponse(lastSearchResponse);
+      if (!queryTokens.length) {
+        setNotice("search-notice", "no query tokens to copy", true);
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(queryTokens.join("\n"));
+        setNotice("search-notice", "query tokens copied", false);
+      } catch (_error) {
+        setNotice("search-notice", "clipboard unavailable", true);
+      }
+    });
+    document.getElementById("btn-copy-exact-hits")?.addEventListener("click", async () => {
+      const { hitTokens } = exactMatchTokensFromResponse(lastSearchResponse);
+      if (!hitTokens.length) {
+        setNotice("search-notice", "no hit tokens to copy", true);
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(hitTokens.join("\n"));
+        setNotice("search-notice", "hit tokens copied", false);
+      } catch (_error) {
+        setNotice("search-notice", "clipboard unavailable", true);
+      }
+    });
+    document.getElementById("btn-download-exact-json")?.addEventListener("click", () => {
+      const { debug } = exactMatchTokensFromResponse(lastSearchResponse);
+      if (!debug) {
+        setNotice("search-notice", "no exact debug data to download", true);
+        return;
+      }
+      downloadTextFile("exact-match-debug.json", `${JSON.stringify(debug, null, 2)}\n`, "application/json;charset=utf-8");
+      setNotice("search-notice", "exact debug JSON downloaded", false);
+    });
+    document.getElementById("btn-download-exact-csv")?.addEventListener("click", () => {
+      const debug = lastSearchResponse?.exactMatchDebug;
+      if (!debug) {
+        setNotice("search-notice", "no exact debug data to download", true);
+        return;
+      }
+      const rows = [
+        ["compareMode", "combineMode", "docId", "chunkId", "matchedTokens", "candidateTokens"],
+        ...(debug.hits || []).map((hit) => [
+          debug.compareMode,
+          debug.combineMode,
+          hit.docId,
+          hit.chunkId,
+          (hit.matchedTokens || []).join(" | "),
+          (hit.candidateTokens || []).join(" | ")
+        ])
+      ];
+      const csv = rows
+        .map((row) =>
+          row
+            .map((cell) => `"${String(cell ?? "").replaceAll("\"", '""')}"`)
+            .join(",")
+        )
+        .join("\n");
+      downloadTextFile("exact-match-debug.csv", `${csv}\n`, "text/csv;charset=utf-8");
+      setNotice("search-notice", "exact debug CSV downloaded", false);
+    });
+    updateThresholdSummary();
   }
 
   function initTextIngest() {
@@ -1819,13 +2033,9 @@
     }
 
     function requestUrl(path) {
-      const url = new URL(`${config.apiBasePath}${path}`, window.location.origin);
-      const context = loadContext();
-      if (context.accessToken) {
-        url.searchParams.set(config.tokenQueryParameter, context.accessToken);
-      }
-      return { url: url.toString(), context };
-    }
+    const url = new URL(`${config.apiBasePath}${path}`, window.location.origin);
+    return { url: url.toString() };
+  }
 
     function setRunning(isRunning) {
       const runButton = document.getElementById("btn-web-ingest");
@@ -1866,16 +2076,14 @@
       setRunning(true);
       setNotice("web-notice", "web ingest streaming...", false);
 
-      const { url, context } = requestUrl("/web-ingest/stream");
+      const { url } = requestUrl("/web-ingest/stream");
       try {
         const response = await fetch(url, {
           method: "POST",
+          credentials: "same-origin",
           headers: {
             Accept: "text/plain",
-            "Content-Type": "application/json",
-            ...(context.accessToken && config.tokenHeaderName
-              ? { [config.tokenHeaderName]: context.accessToken }
-              : {})
+            "Content-Type": "application/json"
           },
           body: JSON.stringify(payload),
           signal: controller.signal
@@ -2732,7 +2940,7 @@
           meta: "Session",
           value: response.currentRole || "ANONYMOUS",
           series: roles.map((role) => (role === response.currentRole ? 1 : 0)),
-          foot: response.securityEnabled ? "Security enabled" : "Security disabled"
+          foot: response.authenticated ? "Authenticated session" : "Not signed in"
         }
       ]);
       renderRoleMatrix("role-matrix", featureRoles);
@@ -2753,14 +2961,816 @@
           entry.message || "-"
         ])
       );
+      setText("access-current-user", response.currentUser || "ANONYMOUS");
+      setText("access-authenticated", response.authenticated ? "yes" : "no");
       setText("access-current-role", response.currentRole || "ANONYMOUS");
-      setText("access-token-header", response.tokenHeaderName);
-      setText("access-token-query", response.tokenQueryParameter);
+      setText("access-current-roles", (response.currentRoles || []).join(", ") || "-");
+      setText("access-login-path", response.loginPath || config.loginPath);
+      setText("access-logout-path", response.logoutPath || config.logoutPath);
       setNotice("access-notice", "access configuration refreshed", false);
     }
 
     document.getElementById("btn-access-refresh")?.addEventListener("click", () => run("access-notice", refreshAccessSecurity));
     run("access-notice", refreshAccessSecurity);
+  }
+
+  function initUsers() {
+    let editingUsername = null;
+    let userCache = [];
+    let latestResponse = {
+      items: [],
+      totalCount: 0,
+      enabledCount: 0,
+      adminCount: 0,
+      recentActions: []
+    };
+    let searchTerm = "";
+    let sortField = "username";
+    let sortDirection = "asc";
+    let pageSize = 10;
+    let pageIndex = 0;
+    let auditPageSize = 10;
+    let auditPageIndex = 0;
+    let refreshTimer = null;
+    let resetTargetUser = null;
+    let selectedAuditEntry = null;
+    let selectedUserUsername = null;
+    let auditFilterAction = "all";
+    let auditFilterSearch = "";
+    let auditFrom = "";
+    let auditTo = "";
+
+    function totalPages(items) {
+      return Math.max(1, Math.ceil(items.length / pageSize));
+    }
+
+    function clampPageIndex(items) {
+      const maxIndex = Math.max(0, totalPages(items) - 1);
+      pageIndex = Math.min(Math.max(pageIndex, 0), maxIndex);
+    }
+
+    function setBodyModalState() {
+      const hasOpenModal = Array.from(document.querySelectorAll(".modal")).some((node) => !node.hidden);
+      document.body.classList.toggle("modal-open", hasOpenModal);
+    }
+
+    function openModal(id) {
+      const node = document.getElementById(id);
+      if (!node) return;
+      node.hidden = false;
+      setBodyModalState();
+    }
+
+    function closeModal(id) {
+      const node = document.getElementById(id);
+      if (!node) return;
+      node.hidden = true;
+      setBodyModalState();
+    }
+
+    function scheduleRefresh(selectUsername) {
+      if (refreshTimer) {
+        window.clearTimeout(refreshTimer);
+      }
+      refreshTimer = window.setTimeout(() => {
+        run("users-notice", () => refreshUsers(selectUsername));
+      }, 220);
+    }
+
+    function updateAuditPagination(totalCount) {
+      const pages = Math.max(1, Math.ceil(Math.max(0, totalCount) / auditPageSize));
+      auditPageIndex = Math.min(Math.max(auditPageIndex, 0), pages - 1);
+      setText(
+        "users-audit-page-info",
+        `Page ${auditPageIndex + 1} of ${pages} · ${totalCount} total`
+      );
+      const prev = document.getElementById("btn-users-audit-prev");
+      const next = document.getElementById("btn-users-audit-next");
+      if (prev) {
+        prev.disabled = auditPageIndex <= 0;
+      }
+      if (next) {
+        next.disabled = auditPageIndex >= pages - 1;
+      }
+    }
+
+    function updatePagination(items) {
+      const currentTotal = totalPages(items);
+      clampPageIndex(items);
+      setText(
+        "users-page-info",
+        `Page ${pageIndex + 1} of ${currentTotal} · ${items.length} total`
+      );
+      const prev = document.getElementById("btn-users-prev");
+      const next = document.getElementById("btn-users-next");
+      if (prev) {
+        prev.disabled = pageIndex <= 0;
+      }
+      if (next) {
+        next.disabled = pageIndex >= currentTotal - 1;
+      }
+    }
+
+    function updateSortControls() {
+      const sortFieldNode = document.getElementById("users-sort-field");
+      const sortDirectionNode = document.getElementById("users-sort-direction");
+      if (sortFieldNode) {
+        sortFieldNode.value = sortField;
+      }
+      if (sortDirectionNode) {
+        sortDirectionNode.value = sortDirection;
+      }
+    }
+
+    function setAuditRange(fromValue, toValue) {
+      auditFrom = fromValue || "";
+      auditTo = toValue || "";
+      auditPageIndex = 0;
+      setValue("users-audit-from", auditFrom);
+      setValue("users-audit-to", auditTo);
+      scheduleRefresh();
+    }
+
+    function setRecentAuditPreset(days) {
+      const end = new Date();
+      const start = new Date(end);
+      start.setDate(start.getDate() - Math.max(0, days - 1));
+      setAuditRange(formatDateInputValue(start), formatDateInputValue(end));
+    }
+
+    function setMonthToDateAuditPreset() {
+      const end = new Date();
+      const start = new Date(end.getFullYear(), end.getMonth(), 1);
+      setAuditRange(formatDateInputValue(start), formatDateInputValue(end));
+    }
+
+    function setMode() {
+      setText("users-mode", editingUsername ? `Editing ${editingUsername}` : "Creating new user");
+      setText("users-save-label", editingUsername ? "Update User" : "Create User");
+      setText(
+        "users-password-hint",
+        editingUsername ? "Leave blank to keep the current password." : "Password is required for new users."
+      );
+      setText("btn-users-save", editingUsername ? "Update User" : "Create User");
+      const username = document.getElementById("users-username");
+      if (username) {
+        username.disabled = Boolean(editingUsername);
+      }
+    }
+
+    function clearForm() {
+      editingUsername = null;
+      setValue("users-username", "");
+      setValue("users-display-name", "");
+      setValue("users-password", "");
+      setValue("users-roles", "ADMIN");
+      const enabled = document.getElementById("users-enabled");
+      if (enabled) {
+        enabled.checked = true;
+      }
+      setMode();
+    }
+
+    function populateForm(user) {
+      editingUsername = user.username;
+      setValue("users-username", user.username);
+      setValue("users-display-name", user.displayName || "");
+      setValue("users-password", "");
+      setValue("users-roles", (user.roles || []).join("\n") || "ADMIN");
+      const enabled = document.getElementById("users-enabled");
+      if (enabled) {
+        enabled.checked = Boolean(user.enabled);
+      }
+      setMode();
+      setNotice("users-notice", `editing ${user.username}`, false);
+    }
+
+    function readForm() {
+      return {
+        username: document.getElementById("users-username")?.value?.trim() || "",
+        displayName: document.getElementById("users-display-name")?.value?.trim() || "",
+        password: document.getElementById("users-password")?.value || "",
+        enabled: Boolean(document.getElementById("users-enabled")?.checked),
+        roles: parseList(document.getElementById("users-roles")?.value).map((role) => role.toUpperCase())
+      };
+    }
+
+    function buildUsersQuery(options = {}) {
+      const params = new URLSearchParams();
+      const query = String(searchTerm || "").trim();
+      if (query) {
+        params.set("q", query);
+      }
+      if (sortField) {
+        params.set("sort", sortField);
+      }
+      if (sortDirection) {
+        params.set("direction", sortDirection);
+      }
+      if (auditFilterAction && auditFilterAction !== "all") {
+        params.set("auditAction", auditFilterAction);
+      }
+      const auditQuery = String(auditFilterSearch || "").trim();
+      if (auditQuery) {
+        params.set("auditQuery", auditQuery);
+      }
+      if (auditFrom) {
+        params.set("auditFrom", auditFrom);
+      }
+      if (auditTo) {
+        params.set("auditTo", auditTo);
+      }
+      params.set("auditLimit", String(options.auditLimit ?? auditPageSize));
+      params.set("auditOffset", String(options.auditOffset ?? (auditPageIndex * auditPageSize)));
+      return params.toString() ? `?${params.toString()}` : "";
+    }
+
+    function filteredAuditEntries() {
+      return latestResponse.recentActions || [];
+    }
+
+    function openResetPasswordModal(user) {
+      resetTargetUser = user;
+      setText("users-reset-target", `Reset password for ${user.username}`);
+      setValue("users-reset-password", "");
+      openModal("users-reset-modal");
+      window.setTimeout(() => {
+        document.getElementById("users-reset-password")?.focus();
+      }, 0);
+    }
+
+    function closeResetPasswordModal() {
+      resetTargetUser = null;
+      closeModal("users-reset-modal");
+    }
+
+    function openAuditDetail(entry) {
+      selectedAuditEntry = entry;
+      const detailSummary = formatAuditDetailSummary(entry);
+      setText(
+        "users-audit-meta",
+        `${entry.action} · ${entry.targetUsername} · ${new Date(entry.timestampEpochMillis).toLocaleString()}`
+      );
+      setText(
+        "users-audit-subtitle",
+        `${entry.success ? "Success" : "Failure"} · ${entry.actorUsername || "-"}`
+      );
+      renderJson("users-audit-detail", {
+        ...entry,
+        summary: detailSummary
+      });
+      setText("users-audit-meta", `${entry.action} · ${entry.targetUsername} · ${new Date(entry.timestampEpochMillis).toLocaleString()}`);
+      const metaNode = document.getElementById("users-audit-meta");
+      if (metaNode) {
+        metaNode.replaceChildren();
+        const lines = [
+          `${entry.action} by ${entry.actorUsername || "system"} (${entry.actorRole || "unknown"})`,
+          `Target: ${entry.targetUsername}`,
+          `Result: ${entry.success ? "success" : "failed"}`,
+          `Summary: ${detailSummary}`
+        ];
+        lines.forEach((line) => {
+          const div = document.createElement("div");
+          div.textContent = line;
+          metaNode.appendChild(div);
+        });
+      }
+      openModal("users-audit-modal");
+    }
+
+    function formatAuditDetailSummary(entry) {
+      const details = entry.details || {};
+      const entries = Object.entries(details);
+      if (!entries.length) {
+        return entry.message || "No field-level changes captured.";
+      }
+      return entries
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(" · ");
+    }
+
+    function closeAuditDetailModal() {
+      selectedAuditEntry = null;
+      closeModal("users-audit-modal");
+    }
+
+    function selectedUser() {
+      if (!selectedUserUsername) {
+        return userCache[0] || null;
+      }
+      return userCache.find((user) => user.username === selectedUserUsername) || null;
+    }
+
+    function renderSelectedUserPanel() {
+      const target = document.getElementById("users-selected-panel");
+      if (!target) return;
+      target.replaceChildren();
+      const user = selectedUser();
+      if (!user) {
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.textContent = "No user selected";
+        target.appendChild(empty);
+        return;
+      }
+      const userAudits = (latestResponse.recentActions || []).filter((entry) => entry.targetUsername === user.username);
+      renderDataCards("users-selected-panel", [
+        {
+          title: user.username,
+          meta: user.enabled ? "Enabled" : "Disabled",
+          bodyHtml: `
+            <div><strong>${escapeHtml(user.displayName || "-")}</strong></div>
+            <div>Roles: ${escapeHtml((user.roles || []).join(", ") || "-")}</div>
+            <div>Password: ${user.passwordConfigured ? "configured" : "missing"}</div>
+          `,
+          chips: [user.enabled ? "active" : "inactive", user.isAdmin ? "admin" : "member", `${userAudits.length} events`]
+        },
+        {
+          title: "Recent activity",
+          meta: "Inline trail",
+          bodyHtml: userAudits.length
+            ? userAudits
+                .slice(0, 4)
+                .map((entry) => `${escapeHtml(entry.action)} · ${escapeHtml(entry.message || "-")}`)
+                .join("<br />")
+            : "No activity recorded for this user.",
+          chips: userAudits.slice(0, 4).map((entry) => entry.action)
+        }
+      ]);
+      renderRoleMatrix("users-selected-matrix", config.featureRoles || {});
+      renderTimeline(
+        "users-selected-timeline",
+        userAudits.slice(0, 8).map((entry, index) => ({
+          phase: entry.action,
+          when: new Date(entry.timestampEpochMillis).toLocaleString(),
+          body: formatAuditDetailSummary(entry),
+          meta: `${entry.targetUsername} · ${entry.success ? "success" : "failed"}`,
+          warn: !entry.success,
+          chips: [entry.actorUsername || "system", entry.actorRole || "audit", `#${index + 1}`]
+        }))
+      );
+    }
+
+    function renderUsersTable(items) {
+      const target = document.getElementById("users-table");
+      if (!target) return;
+      target.replaceChildren();
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.textContent = "No data";
+        target.appendChild(empty);
+        return;
+      }
+
+      const toolbar = document.createElement("div");
+      toolbar.className = "table-toolbar";
+      const count = document.createElement("div");
+      count.className = "table-count";
+      count.textContent = `${items.length} rows`;
+      const hint = document.createElement("div");
+      hint.className = "helper";
+      hint.textContent = `Sorted by ${sortField} ${sortDirection === "desc" ? "descending" : "ascending"}`;
+      toolbar.appendChild(count);
+      toolbar.appendChild(hint);
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "table-wrap";
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const headerRow = document.createElement("tr");
+      const columns = [
+        { key: "username", label: "Username" },
+        { key: "displayName", label: "Display Name" },
+        { key: "enabled", label: "Enabled" },
+        { key: "roles", label: "Roles" },
+        { key: "actions", label: "Actions", sortable: false }
+      ];
+      columns.forEach((column) => {
+        const th = document.createElement("th");
+        if (column.sortable === false) {
+          th.textContent = column.label;
+        } else {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "table-head-button";
+          button.textContent = column.label;
+          if (sortField === column.key) {
+            button.dataset.active = "true";
+            button.setAttribute("aria-sort", sortDirection === "desc" ? "descending" : "ascending");
+            button.textContent = `${column.label} ${sortDirection === "desc" ? "↓" : "↑"}`;
+          }
+          button.addEventListener("click", () => {
+            if (sortField === column.key) {
+              sortDirection = sortDirection === "asc" ? "desc" : "asc";
+            } else {
+              sortField = column.key;
+              sortDirection = column.key === "enabled" ? "desc" : "asc";
+            }
+            updateSortControls();
+            scheduleRefresh();
+          });
+          th.appendChild(button);
+        }
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      const tbody = document.createElement("tbody");
+      items.forEach((user) => {
+        const tr = document.createElement("tr");
+        const cells = [
+          user.username,
+          user.displayName || "-",
+          user.enabled ? "yes" : "no",
+          (user.roles || []).join(", ") || "-",
+          (() => {
+            const actions = document.createElement("div");
+            actions.className = "button-row";
+            actions.appendChild(createButton("View", () => {
+              selectedUserUsername = user.username;
+              renderSelectedUserPanel();
+            }, "secondary"));
+            actions.appendChild(createButton("Edit", () => populateForm(user), "secondary"));
+            actions.appendChild(createButton("Reset Password", () => openResetPasswordModal(user), "secondary"));
+            actions.appendChild(createButton("Delete", () => run("users-notice", async () => {
+              if (!window.confirm(`Delete ${user.username}?`)) {
+                return;
+              }
+              await request(`/users/${encodeSegment(user.username)}`, { method: "DELETE" });
+              if (editingUsername === user.username) {
+                clearForm();
+              }
+              await refreshUsers();
+              setNotice("users-notice", `deleted ${user.username}`, false);
+            }), "secondary"));
+            return actions;
+          })()
+        ];
+        cells.forEach((cellValue) => {
+          const td = document.createElement("td");
+          if (cellValue instanceof window.Node) {
+            td.appendChild(cellValue);
+          } else {
+            td.textContent = cellValue == null ? "" : String(cellValue);
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(thead);
+      table.appendChild(tbody);
+      wrapper.appendChild(table);
+      target.appendChild(toolbar);
+      target.appendChild(wrapper);
+    }
+
+    function renderUserSummary(response) {
+      const admins = response.items.filter((user) => user.enabled && user.isAdmin);
+      renderAnalyticsCards("users-analytics", [
+        {
+          label: "Users",
+          meta: "Accounts",
+          value: formatCompactNumber(response.totalCount),
+          series: response.items.slice(0, 8).map((user) => (user.enabled ? 1 : 0)),
+          foot: `${response.enabledCount} enabled`
+        },
+        {
+          label: "Admins",
+          meta: "Role",
+          value: formatCompactNumber(response.adminCount),
+          series: admins.slice(0, 8).map((user) => (user.enabled ? 1 : 0)),
+          foot: `${admins.length} enabled ADMIN accounts`
+        },
+        {
+          label: "Passwords",
+          meta: "Secret",
+          value: formatCompactNumber(response.items.filter((user) => user.passwordConfigured).length),
+          series: response.items.slice(0, 8).map((user) => (user.passwordConfigured ? 1 : 0)),
+          foot: "Stored as BCrypt hashes"
+        },
+        {
+          label: "Active Roles",
+          meta: "Policy",
+          value: formatCompactNumber(new Set(response.items.flatMap((user) => user.roles || [])).size),
+          series: response.items.slice(0, 8).map((user) => (user.roles || []).length),
+          foot: "Distinct role labels"
+        }
+      ]);
+    }
+
+    function renderAuditTrail(response) {
+      const recentActions = filteredAuditEntries();
+      setText("users-audit-count", recentActions.length);
+      updateAuditPagination(response.auditTotalCount || recentActions.length);
+      setText(
+        "users-audit-summary",
+        `Showing ${recentActions.length} audit event${recentActions.length === 1 ? "" : "s"} of ${response.auditTotalCount || recentActions.length}`
+      );
+      renderTable(
+        "users-audit-table",
+        ["When", "Action", "Actor", "Target", "Outcome", "Details"],
+        recentActions.map((entry) => [
+          new Date(entry.timestampEpochMillis).toLocaleString(),
+          entry.action,
+          [entry.actorUsername, entry.actorRole].filter(Boolean).join(" / ") || "-",
+          entry.targetUsername,
+          entry.success ? "success" : "failed",
+          (() => {
+            const actions = document.createElement("div");
+            actions.className = "button-row";
+            actions.appendChild(createButton("View", () => openAuditDetail(entry), "secondary"));
+            actions.appendChild(createButton("Focus User", () => {
+              selectedUserUsername = entry.targetUsername;
+              renderSelectedUserPanel();
+            }, "secondary"));
+            return actions;
+          })()
+        ])
+      );
+      renderTimeline(
+        "users-audit-timeline",
+        recentActions.map((entry, index) => ({
+          phase: entry.action,
+          when: new Date(entry.timestampEpochMillis).toLocaleString(),
+          message: `${entry.targetUsername}${entry.message ? ` · ${entry.message}` : ""}`,
+          level: entry.success ? "ok" : "error",
+          source: entry.actorUsername || "system",
+          kind: entry.actorRole || "audit",
+          status: entry.success ? "success" : "failed",
+          chips: [entry.targetUsername, entry.actorRole || "unknown", `#${index + 1}`]
+        }))
+      );
+    }
+
+    function renderCurrentPage(response) {
+      const items = userCache.slice();
+      clampPageIndex(items);
+      const start = pageIndex * pageSize;
+      const pageItems = items.slice(start, start + pageSize);
+      updatePagination(items);
+      renderUsersTable(pageItems);
+      renderAuditTrail(response);
+      renderUserSummary(response);
+      renderSelectedUserPanel();
+      renderJson("output-users", {
+        ...response,
+        searchTerm,
+        sortField,
+        sortDirection,
+        pageSize,
+        pageIndex,
+        visibleCount: pageItems.length,
+        filteredCount: items.length
+      });
+    }
+
+    function auditCsvRows(entries) {
+      const escapeCell = (value) => {
+        const text = String(value == null ? "" : value);
+        const escaped = text.replaceAll("\"", "\"\"");
+        return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
+      };
+      const header = [
+        "timestamp",
+        "action",
+        "actorUsername",
+        "actorRole",
+        "targetUsername",
+        "success",
+        "message",
+        "details"
+      ];
+      const rows = entries.map((entry) => [
+        new Date(entry.timestampEpochMillis).toISOString(),
+        entry.action,
+        entry.actorUsername || "",
+        entry.actorRole || "",
+        entry.targetUsername,
+        entry.success ? "true" : "false",
+        entry.message || "",
+        Object.entries(entry.details || {})
+          .map(([key, value]) => `${key}=${value}`)
+          .join("; ")
+      ]);
+      return [header, ...rows]
+        .map((row) => row.map(escapeCell).join(","))
+        .join("\n");
+    }
+
+    async function downloadAuditCsv() {
+      const auditLimit = Math.max(Number(latestResponse.auditTotalCount || 0), 1);
+      const response = await request(`/users${buildUsersQuery({ auditLimit, auditOffset: 0 })}`, { method: "GET" });
+      const entries = response.recentActions || [];
+      const csv = auditCsvRows(entries);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `rag-users-audit-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      setNotice("users-notice", `exported ${entries.length} audit rows`, false);
+    }
+
+    async function refreshUsers(selectUsername) {
+      const response = await request(`/users${buildUsersQuery()}`, { method: "GET" });
+      latestResponse = {
+        ...response,
+        items: response.items || [],
+        recentActions: response.recentActions || [],
+        auditTotalCount: Number(response.auditTotalCount || 0),
+        auditOffset: Number(response.auditOffset || 0),
+        auditLimit: Number(response.auditLimit || auditPageSize)
+      };
+      userCache = latestResponse.items;
+      if (!selectedUserUsername && userCache.length) {
+        selectedUserUsername = userCache[0].username;
+      }
+      if (selectUsername) {
+        const selectedIndex = userCache.findIndex((user) => user.username === selectUsername);
+        if (selectedIndex >= 0) {
+          pageIndex = Math.floor(selectedIndex / pageSize);
+          selectedUserUsername = selectUsername;
+        }
+      }
+      renderCurrentPage(latestResponse);
+      if (selectUsername) {
+        const selected = userCache.find((user) => user.username === selectUsername);
+        if (selected) {
+          populateForm(selected);
+        }
+      }
+      setNotice("users-notice", `loaded ${response.totalCount} users`, false);
+    }
+
+    async function submitResetPassword() {
+      if (!resetTargetUser) {
+        throw new Error("no user selected");
+      }
+      const password = document.getElementById("users-reset-password")?.value?.trim() || "";
+      if (!password) {
+        throw new Error("password is required");
+      }
+      await request(`/users/${encodeSegment(resetTargetUser.username)}/password`, {
+        method: "POST",
+        body: JSON.stringify({ password })
+      });
+      const username = resetTargetUser.username;
+      closeResetPasswordModal();
+      await refreshUsers(username);
+      setNotice("users-notice", `password reset for ${username}`, false);
+    }
+
+    async function saveUser() {
+      const payload = readForm();
+      if (!payload.username) {
+        throw new Error("username is required");
+      }
+      if (!payload.roles.length) {
+        throw new Error("at least one role is required");
+      }
+      const requestBody = {
+        username: payload.username,
+        displayName: payload.displayName || null,
+        enabled: payload.enabled,
+        roles: payload.roles
+      };
+      if (payload.password) {
+        requestBody.password = payload.password;
+      }
+      const action = editingUsername ? "updated" : "created";
+      const response = editingUsername
+        ? await request(`/users/${encodeSegment(editingUsername)}`, {
+            method: "PUT",
+            body: JSON.stringify(requestBody)
+          })
+        : await request("/users", {
+            method: "POST",
+            body: JSON.stringify(requestBody)
+          });
+      renderJson("output-users-action", response);
+      editingUsername = payload.username;
+      setMode();
+      await refreshUsers(payload.username);
+      setNotice("users-notice", `${action} ${payload.username}`, false);
+    }
+
+    document.getElementById("btn-users-refresh")?.addEventListener("click", () => run("users-notice", refreshUsers));
+    document.getElementById("btn-users-clear")?.addEventListener("click", () => {
+      clearForm();
+      setNotice("users-notice", "form cleared", false);
+    });
+    document.getElementById("btn-users-save")?.addEventListener("click", () => run("users-notice", saveUser));
+    document.getElementById("btn-users-prev")?.addEventListener("click", () => {
+      pageIndex = Math.max(0, pageIndex - 1);
+      renderCurrentPage(latestResponse);
+    });
+    document.getElementById("btn-users-next")?.addEventListener("click", () => {
+      pageIndex = Math.min(totalPages(userCache) - 1, pageIndex + 1);
+      renderCurrentPage(latestResponse);
+    });
+    document.getElementById("users-search")?.addEventListener("input", (event) => {
+      searchTerm = event.target.value || "";
+      pageIndex = 0;
+      scheduleRefresh();
+    });
+    document.getElementById("users-page-size")?.addEventListener("change", (event) => {
+      pageSize = Math.max(1, Number(event.target.value) || 10);
+      pageIndex = 0;
+      renderCurrentPage(latestResponse);
+    });
+    document.getElementById("users-sort-field")?.addEventListener("change", (event) => {
+      sortField = event.target.value || "username";
+      pageIndex = 0;
+      scheduleRefresh();
+    });
+    document.getElementById("users-sort-direction")?.addEventListener("change", (event) => {
+      sortDirection = event.target.value || "asc";
+      pageIndex = 0;
+      scheduleRefresh();
+    });
+    document.getElementById("users-audit-action")?.addEventListener("change", (event) => {
+      auditFilterAction = event.target.value || "all";
+      auditPageIndex = 0;
+      scheduleRefresh();
+    });
+    document.getElementById("users-audit-search")?.addEventListener("input", (event) => {
+      auditFilterSearch = event.target.value || "";
+      auditPageIndex = 0;
+      scheduleRefresh();
+    });
+    document.getElementById("users-audit-from")?.addEventListener("change", (event) => {
+      auditFrom = event.target.value || "";
+      auditPageIndex = 0;
+      scheduleRefresh();
+    });
+    document.getElementById("users-audit-to")?.addEventListener("change", (event) => {
+      auditTo = event.target.value || "";
+      auditPageIndex = 0;
+      scheduleRefresh();
+    });
+    document.getElementById("btn-users-audit-clear")?.addEventListener("click", () => {
+      auditFilterAction = "all";
+      auditFilterSearch = "";
+      setAuditRange("", "");
+      setValue("users-audit-action", "all");
+      setValue("users-audit-search", "");
+      setNotice("users-notice", "audit filters cleared", false);
+    });
+    document.getElementById("btn-users-audit-preset-7d")?.addEventListener("click", () => {
+      setRecentAuditPreset(7);
+      setNotice("users-notice", "audit preset set to recent 7 days", false);
+    });
+    document.getElementById("btn-users-audit-preset-30d")?.addEventListener("click", () => {
+      setRecentAuditPreset(30);
+      setNotice("users-notice", "audit preset set to recent 30 days", false);
+    });
+    document.getElementById("btn-users-audit-preset-month")?.addEventListener("click", () => {
+      setMonthToDateAuditPreset();
+      setNotice("users-notice", "audit preset set to this month", false);
+    });
+    document.getElementById("btn-users-export-audit")?.addEventListener("click", () => run("users-notice", downloadAuditCsv));
+    document.getElementById("btn-users-audit-prev")?.addEventListener("click", () => {
+      auditPageIndex = Math.max(0, auditPageIndex - 1);
+      scheduleRefresh();
+    });
+    document.getElementById("btn-users-audit-next")?.addEventListener("click", () => {
+      const pages = Math.max(1, Math.ceil(Math.max(0, latestResponse.auditTotalCount || 0) / auditPageSize));
+      auditPageIndex = Math.min(pages - 1, auditPageIndex + 1);
+      scheduleRefresh();
+    });
+    document.getElementById("users-audit-page-size")?.addEventListener("change", (event) => {
+      auditPageSize = Math.max(1, Number(event.target.value) || 10);
+      auditPageIndex = 0;
+      scheduleRefresh();
+    });
+    document.getElementById("btn-users-reset-submit")?.addEventListener("click", () => run("users-notice", submitResetPassword));
+    document.getElementById("btn-users-reset-cancel")?.addEventListener("click", closeResetPasswordModal);
+    document.getElementById("users-reset-password")?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        run("users-notice", submitResetPassword);
+      }
+    });
+    document.querySelectorAll('[data-modal-close="users-reset-modal"]').forEach((node) => {
+      node.addEventListener("click", closeResetPasswordModal);
+    });
+    document.querySelectorAll('[data-modal-close="users-audit-modal"]').forEach((node) => {
+      node.addEventListener("click", closeAuditDetailModal);
+    });
+    setMode();
+    clearForm();
+    pageSize = Math.max(1, Number(document.getElementById("users-page-size")?.value || 10));
+    auditPageSize = Math.max(1, Number(document.getElementById("users-audit-page-size")?.value || 10));
+    searchTerm = document.getElementById("users-search")?.value || "";
+    sortField = document.getElementById("users-sort-field")?.value || "username";
+    sortDirection = document.getElementById("users-sort-direction")?.value || "asc";
+    auditFrom = document.getElementById("users-audit-from")?.value || "";
+    auditTo = document.getElementById("users-audit-to")?.value || "";
+    updateSortControls();
+    run("users-notice", refreshUsers);
   }
 
   function initConfig() {
@@ -3091,6 +4101,9 @@
         break;
       case "access-security":
         initAccessSecurity();
+        break;
+      case "users":
+        initUsers();
         break;
       case "config":
         initConfig();

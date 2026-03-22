@@ -1,2 +1,3 @@
 com.ainsoft.rag.spring.RagAutoConfiguration
+com.ainsoft.rag.spring.RagAdminJpaAutoConfiguration
 com.ainsoft.rag.spring.RagAdminAutoConfiguration

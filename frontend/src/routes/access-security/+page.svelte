@@ -9,12 +9,14 @@
 >
   <section class="grid">
     <article class="panel">
-      <div class="panel-header"><div><h2>Session Context</h2><p>현재 role과 token 전달 방식을 표시합니다.</p></div></div>
+      <div class="panel-header"><div><h2>Session Context</h2><p>현재 로그인 사용자와 role, 세션 경로를 표시합니다.</p></div></div>
       <div class="stack">
-        <label>Access Token<input data-context="accessToken" placeholder="security enabled 시 사용" /></label>
+        <p class="helper">Signed In: <strong id="access-authenticated" class="mono">-</strong></p>
+        <p class="helper">Current User: <strong id="access-current-user" class="mono">-</strong></p>
         <p class="helper">Current Role: <strong id="access-current-role" class="mono">-</strong></p>
-        <p class="helper">Token Header: <strong id="access-token-header" class="mono">-</strong></p>
-        <p class="helper">Token Query Param: <strong id="access-token-query" class="mono">-</strong></p>
+        <p class="helper">Current Roles: <strong id="access-current-roles" class="mono">-</strong></p>
+        <p class="helper">Login Path: <strong id="access-login-path" class="mono">-</strong></p>
+        <p class="helper">Logout Path: <strong id="access-logout-path" class="mono">-</strong></p>
         <div class="actions"><button id="btn-access-refresh">Refresh Access Security</button></div>
         <div class="notice" id="access-notice"></div>
       </div>
@@ -42,4 +44,3 @@
     </article>
   </section>
 </AdminPage>
-
