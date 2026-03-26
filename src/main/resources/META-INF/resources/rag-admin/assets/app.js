@@ -2,6 +2,10 @@
   const config = window.RAG_ADMIN_CONFIG || {
     basePath: "/rag-admin",
     apiBasePath: "/api/rag/admin",
+    defaultTenantId: "tenant-admin",
+    defaultAclPrincipals: ["group:admin"],
+    defaultSearchPrincipals: ["group:admin"],
+    defaultSearchQuery: "hybrid retrieval",
     defaultRecentProviderWindowMillis: 60000,
     securityEnabled: false,
     currentRole: "ADMIN",
@@ -28,6 +32,7 @@
     { route: "users", feature: "users", label: "Users", caption: "Accounts and passwords", section: "Operations", board: "User Vault" }
   ];
   const storageKey = "rag-admin-shared-context";
+  const legacyDefaultTenantId = "tenant-admin";
 
   function parseList(value) {
     return String(value || "")
@@ -123,20 +128,50 @@
 
   function defaultContext() {
     return {
-      tenantId: "tenant-admin",
+      tenantId: config.defaultTenantId || legacyDefaultTenantId,
       recentProviderWindowMillis: config.defaultRecentProviderWindowMillis
     };
   }
 
   function normalizeContext(input) {
+    const normalizedTenantId = typeof input.tenantId === "string" && input.tenantId.trim()
+      ? input.tenantId.trim()
+      : "";
     return {
-      tenantId: typeof input.tenantId === "string" && input.tenantId.trim()
-        ? input.tenantId.trim()
-        : "tenant-admin",
+      tenantId:
+        normalizedTenantId && !(normalizedTenantId === legacyDefaultTenantId && (config.defaultTenantId || legacyDefaultTenantId) !== legacyDefaultTenantId)
+          ? normalizedTenantId
+          : (config.defaultTenantId || legacyDefaultTenantId),
       recentProviderWindowMillis: Number(
         input.recentProviderWindowMillis || config.defaultRecentProviderWindowMillis
       )
     };
+  }
+
+  function formatInlineList(values) {
+    return (values || []).map((value) => String(value || "").trim()).filter(Boolean).join(", ");
+  }
+
+  function formatMultilineList(values) {
+    return (values || []).map((value) => String(value || "").trim()).filter(Boolean).join("\n");
+  }
+
+  function setConfiguredValue(id, value, legacyValues = []) {
+    const node = document.getElementById(id);
+    if (!node || value == null) return;
+    const normalizedValue = String(value);
+    const currentValue = String(node.value || "");
+    if (!currentValue.trim() || legacyValues.includes(currentValue)) {
+      node.value = normalizedValue;
+    }
+  }
+
+  function applyConfiguredDefaults() {
+    setConfiguredValue("search-principals", formatInlineList(config.defaultSearchPrincipals), ["group:admin"]);
+    setConfiguredValue("search-query", config.defaultSearchQuery || "hybrid retrieval", ["hybrid retrieval"]);
+    setConfiguredValue("ingest-acl", formatInlineList(config.defaultAclPrincipals), ["group:admin"]);
+    setConfiguredValue("upload-acl", formatInlineList(config.defaultAclPrincipals), ["group:admin"]);
+    setConfiguredValue("web-acl", formatMultilineList(config.defaultAclPrincipals), ["group:admin"]);
   }
 
   function loadContext() {
@@ -2016,6 +2051,24 @@
       );
     }
 
+    function splitSseBlock(block) {
+      const lines = block
+        .split(/\r?\n/)
+        .map((line) => line.trimEnd())
+        .filter(Boolean);
+      const event = { event: "message", data: [] };
+
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          event.event = line.slice(6).trim() || "message";
+        } else if (line.startsWith("data:")) {
+          event.data.push(line.slice(5).trimStart());
+        }
+      }
+
+      return event.data.length ? { event: event.event, data: event.data.join("\n") } : null;
+    }
+
     function webIngestPayload() {
       return {
         tenantId: currentTenant(),
@@ -2025,6 +2078,8 @@
         metadata: parseMap(document.getElementById("web-metadata")?.value),
         respectRobotsTxt: Boolean(document.getElementById("web-respect-robots")?.checked),
         incrementalIngest: Boolean(document.getElementById("web-incremental")?.checked),
+        sourceLoadProfile: document.getElementById("web-source-load-profile")?.value?.trim() || null,
+        userAgent: document.getElementById("web-user-agent")?.value?.trim() || "AinsoftRagBot/1.0",
         maxPages: Number(document.getElementById("web-max-pages")?.value || 25),
         maxDepth: Number(document.getElementById("web-max-depth")?.value || 1),
         sameHostOnly: Boolean(document.getElementById("web-same-host")?.checked),
@@ -2082,29 +2137,38 @@
           method: "POST",
           credentials: "same-origin",
           headers: {
-            Accept: "text/plain",
+            Accept: "text/event-stream",
             "Content-Type": "application/json"
           },
           body: JSON.stringify(payload),
           signal: controller.signal
         });
 
+        const contentType = response.headers.get("content-type") || "";
         if (!response.ok || !response.body) {
           throw new Error(`Request failed with ${response.status}`);
+        }
+        if (!contentType.includes("text/event-stream")) {
+          throw new Error("Streaming response was not text/event-stream.");
         }
 
         const decoder = new TextDecoder();
         const reader = response.body.getReader();
         let buffer = "";
+        let currentBlock = "";
         let finalResult = null;
+        let sawTerminalEnvelope = false;
 
-        const flushLine = (line) => {
-          if (!line.trim()) {
+        const flushEvent = (parsedEvent) => {
+          if (!parsedEvent) {
             return;
           }
-          const event = JSON.parse(line);
+          const event = JSON.parse(parsedEvent.data);
           if (event.type === "progress" && event.event) {
             lastProgressEvents.push(event.event);
+            if (["sitemap", "robots", "fetch", "skip", "ingest-failed"].includes(event.event.phase)) {
+              setNotice("web-notice", event.event.message || "web ingest issue detected", false);
+            }
             renderDataCards("web-progress-summary", [
               {
                 title: "Seed URLs",
@@ -2151,6 +2215,10 @@
             );
           } else if (event.type === "result" && event.response) {
             finalResult = event.response;
+            sawTerminalEnvelope = true;
+          } else if (event.type === "done" && event.response) {
+            finalResult = event.response;
+            sawTerminalEnvelope = true;
           } else if (event.type === "error") {
             throw new Error(event.message || "web ingest failed");
           }
@@ -2160,17 +2228,21 @@
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          let newlineIndex = buffer.indexOf("\n");
-          while (newlineIndex >= 0) {
-            const line = buffer.slice(0, newlineIndex);
-            buffer = buffer.slice(newlineIndex + 1);
-            flushLine(line);
-            newlineIndex = buffer.indexOf("\n");
+          const chunks = buffer.split(/\r?\n/);
+          buffer = chunks.pop() || "";
+          for (const line of chunks) {
+            if (line === "") {
+              flushEvent(splitSseBlock(currentBlock));
+              currentBlock = "";
+            } else {
+              currentBlock += `${line}\n`;
+            }
           }
         }
-        const tail = buffer.trim();
+        buffer += decoder.decode();
+        const tail = [currentBlock, buffer].filter(Boolean).join("\n");
         if (tail) {
-          flushLine(tail);
+          flushEvent(splitSseBlock(tail));
         }
 
         if (controller.signal.aborted) {
@@ -2178,7 +2250,21 @@
           return;
         }
         if (!finalResult) {
-          throw new Error("web ingest stream closed before a final result was received");
+          finalResult = {
+            status: sawTerminalEnvelope ? "partial" : "partial",
+            crawledPages: lastProgressEvents.filter((item) => item.phase === "crawl").length,
+            ingestedPages: lastProgressEvents.filter((item) => item.phase === "ingest").length,
+            changedPages: lastProgressEvents.filter((item) => item.phase === "changed").length,
+            skippedPages: lastProgressEvents.filter((item) => item.phase === "skip-existing").length,
+            progress: lastProgressEvents,
+            results: [],
+            failures: []
+          };
+          setNotice(
+            "web-notice",
+            "web ingest finished without a final result envelope; showing partial progress",
+            false
+          );
         }
 
         lastResult = finalResult;
@@ -4069,6 +4155,7 @@
     setBadges();
     setupNavigation();
     bindContext();
+    applyConfiguredDefaults();
     decorateContentShell();
 
     switch (document.body.dataset.page) {

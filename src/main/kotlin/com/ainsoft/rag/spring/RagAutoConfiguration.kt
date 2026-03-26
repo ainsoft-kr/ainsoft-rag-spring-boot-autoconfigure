@@ -2,13 +2,21 @@ package com.ainsoft.rag.spring
 
 import com.ainsoft.rag.api.ContextualRetrievalOptions
 import com.ainsoft.rag.api.CorrectiveRetrievalOptions
+import com.ainsoft.rag.api.DocumentSummarizer
+import com.ainsoft.rag.api.GraphRetrievalOptions
 import com.ainsoft.rag.api.HierarchicalSummaryOptions
+import com.ainsoft.rag.api.IngestPipeline
 import com.ainsoft.rag.api.IndexStats
+import com.ainsoft.rag.api.LateInteractionOptions
+import com.ainsoft.rag.api.MultimodalRetrievalOptions
 import com.ainsoft.rag.api.ProviderHealthExportHook
+import com.ainsoft.rag.api.QueryRewriter
 import com.ainsoft.rag.api.RagComponents
 import com.ainsoft.rag.api.RagConfig
 import com.ainsoft.rag.api.RagEngine
 import com.ainsoft.rag.api.RagOptions
+import com.ainsoft.rag.api.ResultReranker
+import com.ainsoft.rag.api.SearchPipeline
 import com.ainsoft.rag.api.TextGenerationProviderFactory
 import com.ainsoft.rag.api.RerankerOptions
 import com.ainsoft.rag.cache.InMemoryStatsCacheStore
@@ -102,6 +110,26 @@ class RagAutoConfiguration {
                     summarizerModel = summarizerConfig?.model ?: props.summarizerModel,
                     summarizerRequestTimeoutMillis = summarizerConfig?.requestTimeoutMillis
                         ?: props.summarizerRequestTimeoutMillis
+                ),
+                graphRetrieval = GraphRetrievalOptions(
+                    enabled = props.graphRetrievalEnabled,
+                    expandDepth = props.graphRetrievalExpandDepth,
+                    maxSeedDocuments = props.graphRetrievalMaxSeedDocuments,
+                    maxEntityMatches = props.graphRetrievalMaxEntityMatches,
+                    maxDocumentMatches = props.graphRetrievalMaxDocumentMatches,
+                    maxExpansionTerms = props.graphRetrievalMaxExpansionTerms,
+                    scoreBoost = props.graphRetrievalScoreBoost
+                ),
+                multimodalRetrieval = MultimodalRetrievalOptions(
+                    enabled = props.multimodalRetrievalEnabled,
+                    scoreWeight = props.multimodalRetrievalScoreWeight
+                ),
+                lateInteraction = LateInteractionOptions(
+                    enabled = props.lateInteractionEnabled,
+                    scoreWeight = props.lateInteractionScoreWeight,
+                    maxQueryTerms = props.lateInteractionMaxQueryTerms,
+                    windowChars = props.lateInteractionWindowChars,
+                    maxCandidateWindows = props.lateInteractionMaxCandidateWindows
                 )
             )
         )
@@ -203,7 +231,19 @@ class RagAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    fun ragComponents(): RagComponents = RagComponents()
+    fun ragComponents(
+        ingestPipeline: ObjectProvider<IngestPipeline>,
+        searchPipeline: ObjectProvider<SearchPipeline>,
+        queryRewriter: ObjectProvider<QueryRewriter>,
+        reranker: ObjectProvider<ResultReranker>,
+        summarizer: ObjectProvider<DocumentSummarizer>
+    ): RagComponents = RagComponents(
+        ingestPipeline = ingestPipeline.getIfUnique(),
+        searchPipeline = searchPipeline.getIfUnique(),
+        queryRewriter = queryRewriter.getIfUnique(),
+        reranker = reranker.getIfUnique(),
+        summarizer = summarizer.getIfUnique()
+    )
 
     @Bean(destroyMethod = "close")
     fun providerHealthAutoExportLifecycle(
@@ -211,16 +251,6 @@ class RagAutoConfiguration {
         exportHooks: ObjectProvider<ProviderHealthExportHook>
     ): ProviderHealthAutoExportLifecycle {
         val hooks = buildList {
-            props.providerHealthAutoExportPath?.takeIf { it.isNotBlank() }?.let {
-                add(
-                    createProviderHealthExportHook(
-                        path = Path.of(it),
-                        format = props.providerHealthAutoExportFormat,
-                        retainCount = props.providerHealthAutoExportRetainCount,
-                        includeScopeSuffix = props.providerHealthAutoExportIncludeScopeSuffix
-                    )
-                )
-            }
             props.providerHealthAutoExportPushUrl?.takeIf { it.isNotBlank() }?.let {
                 add(
                     createProviderHealthPushExportHook(
@@ -238,6 +268,16 @@ class RagAutoConfiguration {
                         asyncQueueEnabled = props.providerHealthAutoExportPushAsyncEnabled,
                         asyncQueueCapacity = props.providerHealthAutoExportPushQueueCapacity,
                         asyncQueueDropOldest = props.providerHealthAutoExportPushDropOldestOnOverflow
+                    )
+                )
+            }
+            props.providerHealthAutoExportPath?.takeIf { it.isNotBlank() }?.let {
+                add(
+                    createProviderHealthExportHook(
+                        path = Path.of(it),
+                        format = props.providerHealthAutoExportFormat,
+                        retainCount = props.providerHealthAutoExportRetainCount,
+                        includeScopeSuffix = props.providerHealthAutoExportIncludeScopeSuffix
                     )
                 )
             }

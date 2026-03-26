@@ -8,6 +8,7 @@ class RagAdminWebIngestRequest() {
     var allowedDomains: List<String> = emptyList()
     var respectRobotsTxt: Boolean = true
     var incrementalIngest: Boolean = true
+    var sourceLoadProfile: String? = null
     var userAgent: String = "AinsoftRagBot/1.0"
     var maxPages: Int? = null
     var maxDepth: Int? = null
@@ -22,6 +23,7 @@ class RagAdminWebIngestRequest() {
         allowedDomains: List<String> = emptyList(),
         respectRobotsTxt: Boolean = true,
         incrementalIngest: Boolean = true,
+        sourceLoadProfile: String? = null,
         userAgent: String = "AinsoftRagBot/1.0",
         maxPages: Int? = null,
         maxDepth: Int? = null,
@@ -35,6 +37,7 @@ class RagAdminWebIngestRequest() {
         this.allowedDomains = allowedDomains
         this.respectRobotsTxt = respectRobotsTxt
         this.incrementalIngest = incrementalIngest
+        this.sourceLoadProfile = sourceLoadProfile
         this.userAgent = userAgent
         this.maxPages = maxPages
         this.maxDepth = maxDepth

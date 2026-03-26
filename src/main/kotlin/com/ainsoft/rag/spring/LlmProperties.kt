@@ -1,6 +1,7 @@
 package com.ainsoft.rag.spring
 
 import com.ainsoft.rag.api.LlmProviderConfig
+import com.ainsoft.rag.graph.GraphRagExtractionPreset
 import org.springframework.boot.context.properties.ConfigurationProperties
 
 @ConfigurationProperties(prefix = "llm")
@@ -9,7 +10,8 @@ data class LlmProperties(
     val providers: Map<String, LlmProviderDefinition> = emptyMap(),
     val queryRewrite: LlmBindingProperties = LlmBindingProperties(),
     val summarizer: LlmBindingProperties = LlmBindingProperties(),
-    val embedding: LlmBindingProperties = LlmBindingProperties()
+    val embedding: LlmBindingProperties = LlmBindingProperties(),
+    val graphExtraction: LlmBindingProperties = LlmBindingProperties()
 ) {
     fun resolveQueryRewrite(): LlmProviderConfig? = resolveBinding(queryRewrite)
 
@@ -17,7 +19,18 @@ data class LlmProperties(
 
     fun resolveEmbedding(): LlmProviderConfig? = resolveBinding(embedding)
 
-    fun resolveBinding(binding: LlmBindingProperties): LlmProviderConfig? {
+    fun resolveGraphExtraction(): ResolvedLlmBindingConfig {
+        val preset = GraphRagExtractionPreset.fromName(graphExtraction.preset)
+        return ResolvedLlmBindingConfig(
+            config = resolveBinding(graphExtraction, preset),
+            preset = preset
+        )
+    }
+
+    fun resolveBinding(
+        binding: LlmBindingProperties,
+        graphPreset: GraphRagExtractionPreset? = null
+    ): LlmProviderConfig? {
         val providerName = binding.provider?.takeIf { it.isNotBlank() }
             ?: defaultProvider?.takeIf { it.isNotBlank() }
         val provider = providerName?.let { providers[it] }
@@ -32,7 +45,7 @@ data class LlmProperties(
             ?: provider?.apiKey?.takeIf { it.isNotBlank() }
         val model = binding.model?.takeIf { it.isNotBlank() }
             ?: provider?.model?.takeIf { it.isNotBlank() }
-            ?: defaultModelForKind(kind)
+            ?: defaultModelForKind(kind, graphPreset)
         val requestTimeoutMillis = binding.requestTimeoutMillis
             ?: provider?.requestTimeoutMillis
             ?: 30_000
@@ -59,13 +72,21 @@ data class LlmProperties(
             else -> null
         }
 
-    private fun defaultModelForKind(kind: String): String? =
-        when (kind.trim().lowercase()) {
+    private fun defaultModelForKind(
+        kind: String,
+        graphPreset: GraphRagExtractionPreset? = null
+    ): String? =
+        graphPreset?.defaultModelForKind(kind) ?: when (kind.trim().lowercase()) {
             "openai", "openai-compatible" -> "gpt-4o-mini"
             "anthropic", "claude" -> "claude-3-5-sonnet-latest"
             "gemini", "google-gemini" -> "gemini-2.0-flash"
             else -> null
         }
+
+    data class ResolvedLlmBindingConfig(
+        val config: LlmProviderConfig?,
+        val preset: GraphRagExtractionPreset = GraphRagExtractionPreset.DEFAULT
+    )
 }
 
 data class LlmProviderDefinition(
@@ -83,5 +104,6 @@ data class LlmBindingProperties(
     val baseUrl: String? = null,
     val apiKey: String? = null,
     val model: String? = null,
-    val requestTimeoutMillis: Long? = null
+    val requestTimeoutMillis: Long? = null,
+    val preset: String? = null
 )

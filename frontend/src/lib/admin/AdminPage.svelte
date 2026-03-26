@@ -5,7 +5,8 @@
 
   $: bootstrapHtml =
     `<script>document.body.dataset.page = ${JSON.stringify(page)}; window.RAG_ADMIN_CONFIG = __RAG_ADMIN_CONFIG__;</scr` +
-    `ipt><script src="assets/app.js"></scr` +
+    `ipt>${page === 'graph' ? '<script src="assets/vendor/cytoscape.min.js"></scr' + 'ipt>' : ''}` +
+    `<script src="assets/app.js"></scr` +
     'ipt>';
 </script>
 
@@ -18,12 +19,7 @@
   <aside class="sidebar">
     <section class="brand">
       <span class="brand-mark">RA</span>
-      <div>
-        <div class="brand-title">RAG Admin</div>
-        {#if copy}
-          <p class="brand-copy">{copy}</p>
-        {/if}
-      </div>
+      <div class="brand-title">RAG Admin</div>
     </section>
     <nav class="nav-menu"></nav>
   </aside>

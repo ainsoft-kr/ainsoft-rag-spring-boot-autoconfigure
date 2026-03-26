@@ -5,37 +5,46 @@
 <AdminPage
   title="Ainsoft RAG Admin File Ingest"
   page="file-ingest"
-  copy="Upload-focused ingest pipeline for binary and text assets."
+  copy=""
 >
-  <section class="grid file-ingest-grid">
-    <article class="panel">
-      <div class="panel-header"><div><h2>Upload Sheet</h2><p>업로드 기반 ingest 역시 Job History에서 추적됩니다.</p></div></div>
-      <div class="stack">
-        <div class="dual">
-          <label>Tenant ID<input data-context="tenantId" value="tenant-admin" /></label>
-          <label>Recent Provider Window (ms)<input data-context="recentProviderWindowMillis" type="number" value="60000" /></label>
+  <section class="grid">
+    <article class="panel full">
+      <div class="panel-header">
+        <div style="display: flex; align-items: center;">
+          <h2>Upload Sheet</h2>
+          <span class="help-icon">?
+            <div class="tooltip">
+              <h3 style="color: var(--accent);">How It Works</h3>
+              <p>업로드 문서는 파일 타입에 따라 파싱되고, 같은 내용이면 재업로드를 건너뜁니다.</p>
+              <h3>Incremental</h3>
+              <p>같은 tenant와 docId에 대해 내용이 같으면 `skipped`로 처리합니다.</p>
+              <h3>Binary parsing</h3>
+              <p>pdf/docx/pptx는 parser pipeline을 통해 normalized text로 변환됩니다.</p>
+              <h3>Traceability</h3>
+              <p>업로드 후 문서 탐색기에서 docId 기준으로 바로 추적할 수 있습니다.</p>
+            </div>
+          </span>
         </div>
-        <div class="dual">
+        <p>업로드 기반 ingest 역시 Job History에서 추적됩니다.</p>
+      </div>
+      <div class="stack">
+        <div class="triple">
+          <div class="dual" style="gap: 12px;">
+            <label>Tenant ID<input data-context="tenantId" value="tenant-admin" /></label>
+            <label>Provider Window (ms)<input data-context="recentProviderWindowMillis" type="number" value="60000" /></label>
+          </div>
           <label>Upload Doc ID<input id="upload-doc-id" value="admin-upload-001" /></label>
           <label>Upload ACL<input id="upload-acl" value="group:admin" /></label>
         </div>
-        <div class="dual">
-          <label>Incremental Ingest<input id="upload-incremental" type="checkbox" checked /></label>
-          <div></div>
+        <div class="triple">
+          <label>Incremental Ingest<input id="upload-incremental" type="checkbox" checked style="width: 24px; height: 24px; margin-top: 8px;" /></label>
+          <label>Upload Metadata (`key=value`)<textarea id="upload-metadata" style="min-height: 80px;">surface=upload</textarea></label>
+          <label>File<input id="upload-file" type="file" style="margin-top: 8px;" /></label>
         </div>
-        <label>Upload Metadata (`key=value`)<textarea id="upload-metadata">surface=upload</textarea></label>
-        <label>File<input id="upload-file" type="file" /></label>
-        <div class="actions"><button id="btn-upload">Upload File</button></div>
+        <div class="actions">
+          <button id="btn-upload">Upload File</button>
+        </div>
         <div class="notice" id="upload-notice"></div>
-      </div>
-    </article>
-
-    <article class="panel">
-      <div class="panel-header"><div><h2>How It Works</h2><p>업로드 문서는 파일 타입에 따라 파싱되고, 같은 내용이면 재업로드를 건너뜁니다.</p></div></div>
-      <div class="feature-grid">
-        <div class="feature-card"><h3>Incremental</h3><p>같은 tenant와 docId에 대해 내용이 같으면 `skipped`로 처리합니다.</p></div>
-        <div class="feature-card"><h3>Binary parsing</h3><p>pdf/docx/pptx는 parser pipeline을 통해 normalized text로 변환됩니다.</p></div>
-        <div class="feature-card"><h3>Traceability</h3><p>업로드 후 문서 탐색기에서 docId 기준으로 바로 추적할 수 있습니다.</p></div>
       </div>
     </article>
 

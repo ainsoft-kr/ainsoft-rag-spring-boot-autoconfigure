@@ -29,13 +29,12 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.multipart.MultipartFile
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.io.IOException
 import java.nio.charset.Charset
-import java.nio.charset.StandardCharsets
 import java.time.Instant
-import java.util.concurrent.atomic.AtomicBoolean
 import java.text.Normalizer
+import java.util.concurrent.Executor
 
 @RestController
 @RequestMapping("\${rag.admin.api-base-path:/api/rag/admin}")
@@ -46,7 +45,8 @@ class RagAdminApiController(
     private val embeddingProvider: EmbeddingProvider,
     private val adminService: RagAdminService,
     private val securityService: RagAdminSecurityService,
-    private val accountManagementService: RagAdminAccountManagementService
+    private val accountManagementService: RagAdminAccountManagementService,
+    private val streamExecutor: Executor
 ) {
     private val objectMapper = jacksonObjectMapper()
     private val plainTextParser = PlainTextParser()
@@ -212,72 +212,84 @@ class RagAdminApiController(
     @PostMapping(
         "/web-ingest/stream",
         consumes = [MediaType.APPLICATION_JSON_VALUE],
-        produces = [MediaType.TEXT_PLAIN_VALUE]
+        produces = [MediaType.TEXT_EVENT_STREAM_VALUE]
     )
     fun webIngestStream(
         requestContext: HttpServletRequest,
         @RequestBody request: RagAdminWebIngestRequest
-    ): ResponseEntity<StreamingResponseBody> {
+    ): SseEmitter {
         val access = securityService.requireFeature(requestContext, "web-ingest")
-        val cancelled = AtomicBoolean(false)
-        val body = StreamingResponseBody { outputStream ->
-            outputStream.bufferedWriter(StandardCharsets.UTF_8).use { writer ->
-                fun writeLine(value: Any) {
-                    if (cancelled.get()) {
-                        return
-                    }
-                    writer.write(objectMapper.writeValueAsString(value))
-                    writer.write("\n")
-                    writer.flush()
-                }
-
-                try {
-                    writeLine(
-                        RagAdminWebIngestStreamEnvelope(
-                            type = "start",
-                            message = "starting web ingest"
-                        )
-                    )
-                    val response = adminService.webIngest(
-                        access.role,
-                        request,
-                        progressSink = { event ->
-                            writeLine(
-                                RagAdminWebIngestStreamEnvelope(
-                                    type = "progress",
-                                    event = event
-                                )
+        val emitter = SseEmitter(0L)
+        streamExecutor.execute {
+            try {
+                emitter.send(
+                    SseEmitter.event()
+                        .name("start")
+                        .data(
+                            RagAdminWebIngestStreamEnvelope(
+                                type = "start",
+                                message = "starting web ingest"
                             )
-                        },
-                        isCancelled = { cancelled.get() }
-                    )
-                    if (!cancelled.get()) {
-                        writeLine(
+                        )
+                )
+                val response = adminService.webIngest(
+                    access.role,
+                    request,
+                    progressSink = { event ->
+                        emitter.send(
+                            SseEmitter.event()
+                                .name("progress")
+                                .data(
+                                    RagAdminWebIngestStreamEnvelope(
+                                        type = "progress",
+                                        event = event
+                                    )
+                                )
+                        )
+                    }
+                )
+                emitter.send(
+                    SseEmitter.event()
+                        .name("result")
+                        .data(
                             RagAdminWebIngestStreamEnvelope(
                                 type = "result",
                                 response = response
                             )
                         )
-                    }
-                } catch (_: IOException) {
-                    cancelled.set(true)
-                } catch (_: WebIngestCancelledException) {
-                    cancelled.set(true)
-                } catch (error: Exception) {
-                    if (!cancelled.get()) {
-                        writeLine(
+                )
+                emitter.send(
+                    SseEmitter.event()
+                        .name("done")
+                        .data(
                             RagAdminWebIngestStreamEnvelope(
-                                type = "error",
-                                message = error.message ?: "web ingest failed"
+                                type = "done",
+                                response = response
                             )
                         )
-                    }
+                )
+                emitter.complete()
+            } catch (_: IOException) {
+                emitter.complete()
+            } catch (_: WebIngestCancelledException) {
+                emitter.complete()
+            } catch (error: Exception) {
+                runCatching {
+                    emitter.send(
+                        SseEmitter.event()
+                            .name("error")
+                            .data(
+                                RagAdminWebIngestStreamEnvelope(
+                                    type = "error",
+                                    message = error.message ?: "web ingest failed"
+                                )
+                            )
+                    )
                 }
+                emitter.complete()
             }
         }
-        return ResponseEntity.ok()
-            .contentType(MediaType.TEXT_PLAIN)
-            .body(body)
+        return emitter
     }
 
     @PostMapping("/search")
@@ -286,24 +298,25 @@ class RagAdminApiController(
         @RequestBody request: RagAdminSearchRequest
     ): RagAdminSearchResponse {
         val access = securityService.requireFeature(requestContext, "search")
-        require(request.principals.isNotEmpty()) { "principals must not be empty" }
-        require(request.query.isNotBlank()) { "query must not be blank" }
+        val normalizedRequest = normalizeSearchRequest(request)
+        require(normalizedRequest.principals.isNotEmpty()) { "principals must not be empty" }
+        require(normalizedRequest.query.isNotBlank()) { "query must not be blank" }
 
         val response = engine.searchDetailed(
             SearchRequest(
-                tenantId = request.tenantId,
-                principals = request.principals,
-                query = request.query,
-                topK = request.topK,
-                filter = request.filter
+                tenantId = normalizedRequest.tenantId,
+                principals = normalizedRequest.principals,
+                query = normalizedRequest.query,
+                topK = normalizedRequest.topK,
+                filter = normalizedRequest.filter
             )
         )
         val globalProviderHealth = providerTelemetrySnapshot()
-        val recentProviderHealth = request.recentProviderWindowMillis?.let { providerTelemetrySnapshot(it) }
+        val recentProviderHealth = normalizedRequest.recentProviderWindowMillis?.let { providerTelemetrySnapshot(it) }
 
         val result = RagAdminSearchResponse(
-            tenantId = request.tenantId,
-            query = request.query,
+            tenantId = normalizedRequest.tenantId,
+            query = normalizedRequest.query,
             hits = response.hits.map { hit ->
                 RagAdminSearchHitResponse(
                     docId = hit.source.docId,
@@ -319,15 +332,15 @@ class RagAdminApiController(
                 )
             },
             telemetry = response.telemetry.toResponse(),
-            providerTelemetry = globalProviderHealth.toResponse(request.providerHealthDetail),
-            recentProviderWindowMillis = request.recentProviderWindowMillis,
-            recentProviderTelemetry = recentProviderHealth?.toResponse(request.providerHealthDetail)
-        ).applyExactMatchFilterIfRequested(request)
+            providerTelemetry = globalProviderHealth.toResponse(normalizedRequest.providerHealthDetail),
+            recentProviderWindowMillis = normalizedRequest.recentProviderWindowMillis,
+            recentProviderTelemetry = recentProviderHealth?.toResponse(normalizedRequest.providerHealthDetail)
+        ).applyExactMatchFilterIfRequested(normalizedRequest)
         .suppressWeakMatches(
-            finalConfidenceThreshold = request.searchNoMatchMinFinalConfidence ?: properties.searchNoMatchMinFinalConfidence,
-            topHitScoreThreshold = request.searchNoMatchMinTopHitScore ?: properties.searchNoMatchMinTopHitScore
+            finalConfidenceThreshold = normalizedRequest.searchNoMatchMinFinalConfidence ?: properties.searchNoMatchMinFinalConfidence,
+            topHitScoreThreshold = normalizedRequest.searchNoMatchMinTopHitScore ?: properties.searchNoMatchMinTopHitScore
         )
-        adminService.recordSearchAudit("search", access.role, request, result.hits.size, result.telemetry)
+        adminService.recordSearchAudit("search", access.role, normalizedRequest, result.hits.size, result.telemetry)
         return result
     }
 
@@ -337,30 +350,31 @@ class RagAdminApiController(
         @RequestBody request: RagAdminSearchRequest
     ): RagAdminSearchDiagnosticsResponse {
         val access = securityService.requireFeature(requestContext, "search")
-        require(request.principals.isNotEmpty()) { "principals must not be empty" }
-        require(request.query.isNotBlank()) { "query must not be blank" }
+        val normalizedRequest = normalizeSearchRequest(request)
+        require(normalizedRequest.principals.isNotEmpty()) { "principals must not be empty" }
+        require(normalizedRequest.query.isNotBlank()) { "query must not be blank" }
 
         val searchRequest = SearchRequest(
-            tenantId = request.tenantId,
-            principals = request.principals,
-            query = request.query,
-            topK = request.topK,
-            filter = request.filter
+            tenantId = normalizedRequest.tenantId,
+            principals = normalizedRequest.principals,
+            query = normalizedRequest.query,
+            topK = normalizedRequest.topK,
+            filter = normalizedRequest.filter
         )
         val diagnostics = SearchDiagnostics.analyze(
             indexPath = ragConfig.indexPath,
             embeddingProvider = embeddingProvider,
             request = searchRequest,
-            maxSamples = request.diagnosticMaxSamples,
-            scoreThreshold = request.diagnosticScoreThreshold
+            maxSamples = normalizedRequest.diagnosticMaxSamples,
+            scoreThreshold = normalizedRequest.diagnosticScoreThreshold
         )
         val search = engine.searchDetailed(searchRequest)
         val globalProviderHealth = providerTelemetrySnapshot()
-        val recentProviderHealth = request.recentProviderWindowMillis?.let { providerTelemetrySnapshot(it) }
+        val recentProviderHealth = normalizedRequest.recentProviderWindowMillis?.let { providerTelemetrySnapshot(it) }
 
         val result = RagAdminSearchDiagnosticsResponse(
-            tenantId = request.tenantId,
-            query = request.query,
+            tenantId = normalizedRequest.tenantId,
+            query = normalizedRequest.query,
             tenantDocs = diagnostics.tenantDocs,
             lexicalMatchesWithoutAcl = diagnostics.lexicalMatchesWithoutAcl,
             vectorMatchesWithoutAcl = diagnostics.vectorMatchesWithoutAcl,
@@ -371,14 +385,14 @@ class RagAdminApiController(
             lexicalSampleDocIdsWithAcl = diagnostics.lexicalSampleDocIdsWithAcl,
             vectorSampleDocIdsWithAcl = diagnostics.vectorSampleDocIdsWithAcl,
             telemetry = search.telemetry.toResponse(),
-            providerTelemetry = globalProviderHealth.toResponse(request.providerHealthDetail),
-            recentProviderWindowMillis = request.recentProviderWindowMillis,
-            recentProviderTelemetry = recentProviderHealth?.toResponse(request.providerHealthDetail)
+            providerTelemetry = globalProviderHealth.toResponse(normalizedRequest.providerHealthDetail),
+            recentProviderWindowMillis = normalizedRequest.recentProviderWindowMillis,
+            recentProviderTelemetry = recentProviderHealth?.toResponse(normalizedRequest.providerHealthDetail)
         )
         adminService.recordSearchAudit(
             auditType = "diagnose-search",
             role = access.role,
-            request = request,
+            request = normalizedRequest,
             resultCount = result.vectorMatchesWithAcl + result.lexicalMatchesWithAcl,
             telemetry = result.telemetry
         )
@@ -763,6 +777,23 @@ class RagAdminApiController(
         require(normalized.isNotBlank()) { "$fieldName must not be blank after normalization" }
         return normalized
     }
+
+    private fun normalizeSearchRequest(request: RagAdminSearchRequest): RagAdminSearchRequest =
+        RagAdminSearchRequest(
+            tenantId = normalizeIdentifier(request.tenantId, "tenantId"),
+            principals = request.principals.map { it.trim() }.filter { it.isNotBlank() },
+            query = request.query,
+            topK = request.topK,
+            filter = request.filter,
+            providerHealthDetail = request.providerHealthDetail,
+            recentProviderWindowMillis = request.recentProviderWindowMillis,
+            searchNoMatchMinFinalConfidence = request.searchNoMatchMinFinalConfidence,
+            searchNoMatchMinTopHitScore = request.searchNoMatchMinTopHitScore,
+            searchExactMatchOnly = request.searchExactMatchOnly,
+            searchExactMatchMode = request.searchExactMatchMode,
+            diagnosticScoreThreshold = request.diagnosticScoreThreshold,
+            diagnosticMaxSamples = request.diagnosticMaxSamples
+        )
 
     private fun normalizeFilename(raw: String?): String? {
         if (raw.isNullOrBlank()) return null

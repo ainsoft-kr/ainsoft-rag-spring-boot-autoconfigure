@@ -8,6 +8,8 @@ import com.ainsoft.rag.api.RagEngineMaintenance
 import com.ainsoft.rag.api.RagEngineMaintenanceResult
 import com.ainsoft.rag.api.UpsertDocumentRequest
 import com.ainsoft.rag.embeddings.EmbeddingProvider
+import com.ainsoft.rag.graph.GraphProjectionService
+import com.ainsoft.rag.graph.GraphStore
 import com.ainsoft.rag.impl.IndexSchema
 import com.ainsoft.rag.impl.providerTelemetrySnapshot
 import com.ainsoft.rag.parsers.PlainTextParser
@@ -51,7 +53,9 @@ class RagAdminService(
     private val properties: RagProperties,
     private val adminProperties: RagAdminProperties,
     private val ragConfig: RagConfig,
-    private val embeddingProvider: EmbeddingProvider
+    private val embeddingProvider: EmbeddingProvider,
+    private val graphStore: GraphStore,
+    private val graphProjectionService: GraphProjectionService
 ) : RagAdminUserAuditSink {
     private val objectMapper = jacksonObjectMapper()
     private val plainTextParser = PlainTextParser()
@@ -377,6 +381,7 @@ class RagAdminService(
     fun deleteDocument(tenantId: String, docId: String): RagAdminOperationResponse {
         val deleted = engine.deleteDocument(tenantId, docId)
         clearIngestSnapshotCache(tenantId, docId)
+        runCatching { graphStore.deleteDocument(tenantId, docId) }
         recordProviderSnapshot("delete-document")
         return RagAdminOperationResponse(
             operation = "deleteDocument",
@@ -450,6 +455,7 @@ class RagAdminService(
         require(request.acl.isNotEmpty()) { "acl must not be empty" }
         val effectiveMaxPages = (request.maxPages ?: 25).coerceAtLeast(1)
         val effectiveMaxDepth = (request.maxDepth ?: 1).coerceAtLeast(0)
+        val resolvedProfile = properties.resolveSourceLoadProfile(request.sourceLoadProfile)
 
         val normalizedUrls = request.urls.map { normalizeWebUrl(it) }
         val jobId = startJob(
@@ -464,11 +470,12 @@ class RagAdminService(
                 "maxPages" to effectiveMaxPages,
                 "maxDepth" to effectiveMaxDepth,
                 "sameHostOnly" to request.sameHostOnly,
-                "incrementalIngest" to request.incrementalIngest
+                "incrementalIngest" to request.incrementalIngest,
+                "sourceLoadProfile" to (request.sourceLoadProfile ?: "default"),
+                "userAgent" to request.userAgent
             )
         )
         try {
-            val resolvedProfile = properties.resolveSourceLoadProfile(null)
             val crawl = webCrawler.crawl(
                 seedUrls = normalizedUrls,
                 allowedDomains = request.allowedDomains,
@@ -558,6 +565,22 @@ class RagAdminService(
                             sourceUri = page.url
                         )
                     )
+                    runCatching {
+                        graphStore.upsertProjection(
+                            graphProjectionService.projectDocument(
+                                tenantId = normalizedTenantId,
+                                docId = normalizedDocId,
+                                request = UpsertDocumentRequest(
+                                    tenantId = normalizedTenantId,
+                                    docId = normalizedDocId,
+                                    normalizedText = normalizedText,
+                                    metadata = metadata,
+                                    acl = Acl(request.acl),
+                                    sourceUri = page.url
+                                )
+                            )
+                        )
+                    }
                     rememberIngestSnapshot(normalizedTenantId, normalizedDocId, contentHash, currentPreview)
                     if (wasChanged) {
                         changedPages += 1
@@ -821,6 +844,15 @@ class RagAdminService(
             )
         )
         rememberIngestSnapshot(normalizedTenantId, normalizedDocId, contentHash, preview)
+        runCatching {
+            graphStore.upsertProjection(
+                graphProjectionService.projectDocument(
+                    tenantId = normalizedTenantId,
+                    docId = normalizedDocId,
+                    request = request
+                )
+            )
+        }
         return RagAdminIngestOutcome(
             status = if (wasChanged) "changed" else "ingested",
             message = when {
@@ -879,6 +911,7 @@ class RagAdminService(
     fun deleteTenant(tenantId: String): RagAdminOperationResponse {
         val deleted = engine.deleteTenant(tenantId)
         clearIngestSnapshotCache(tenantId)
+        runCatching { graphStore.deleteTenant(tenantId) }
         recordProviderSnapshot("delete-tenant")
         return RagAdminOperationResponse(
             operation = "deleteTenant",
@@ -988,6 +1021,7 @@ class RagAdminService(
             runCatching {
                 val deleted = engine.deleteDocument(request.tenantId, docId)
                 clearIngestSnapshotCache(request.tenantId, docId)
+                runCatching { graphStore.deleteDocument(request.tenantId, docId) }
                 RagAdminBulkItemResult(docId, true, "deleted $deleted chunks", "deleted")
             }.getOrElse { error ->
                 RagAdminBulkItemResult(docId, false, error.message ?: "bulk delete failed", "failed")

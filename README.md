@@ -48,6 +48,13 @@ implementation("com.ainsoft.rag:ainsoft-rag-spring-boot-autoconfigure:0.1.0")
 - `rag.correctiveRetrievalEnabled`
 - `rag.queryRewriteEnabled`
 - `rag.hierarchicalSummariesEnabled`
+- `rag.graphRetrievalEnabled`
+- `rag.multimodalRetrievalEnabled`
+- `rag.lateInteractionEnabled`
+- `rag.graphProvider`
+- `rag.graphFalkorHost`
+- `rag.graphFalkorPort`
+- `rag.graphFalkorGraphNamePrefix`
 - `rag.statsCacheStoreType`
 - `rag.providerHealthAutoExportPath`
 - `rag.providerHealthAutoExportPushUrl`
@@ -83,10 +90,15 @@ llm:
   summarizer:
     provider: openai
     model: gpt-4o-mini
+  graphExtraction:
+    provider: openai
+    preset: technical
 ```
 
 지원하는 provider kind는 `openai-compatible`, `openai`, `anthropic`, `claude`, `gemini`, `google-gemini`, `vertex`, `vertex-ai`, `vertex-gemini`입니다.
 `gemini`는 Google Generative Language API를, `vertex*`는 Vertex AI Gemini 엔드포인트를 대상으로 둡니다.
+`llm.graphExtraction.preset`은 `default`, `technical`, `korean_doc`, `policy`, `website`를 지원합니다.
+`technical`은 기술 문서용 추출 규칙과 더 강한 기본 모델을 함께 적용합니다. `model`을 따로 주면 그 값이 우선합니다.
 
 예시:
 
@@ -103,9 +115,33 @@ rag:
   correctiveRetrievalEnabled: true
   queryRewriteEnabled: true
   hierarchicalSummariesEnabled: true
+  graphRetrievalEnabled: true
+  multimodalRetrievalEnabled: true
+  lateInteractionEnabled: false
+  graphProvider: falkordb
+  graphFalkorHost: 127.0.0.1
+  graphFalkorPort: 6379
+  graphFalkorUsername: ""
+  graphFalkorPassword: ""
+  graphFalkorGraphNamePrefix: rag
+  graphFallbackToMemory: true
   statsCacheStoreType: file
   statsCacheFilePath: ./rag-index/stats-cache.json
 ```
+
+`graphProvider`의 기본값은 `falkordb`입니다. FalkorDB 서버가 실행 중이면 그래프는 해당 서버에 저장되고, 서버가 없으면 부팅 시 in-memory graph store로 안전하게 fallback 됩니다. 실제 FalkorDB 연결을 강제하려면 `rag.graphFallbackToMemory=false`로 설정하세요.
+`llm.graphExtraction`을 설정하면 문서 ingest 시 entity/relation 추출을 heuristic 대신 LLM 기반으로 수행합니다.
+`rag.graphRetrievalEnabled=true`를 켜면 검색 시 graph store에서 entity/document 주변 용어를 뽑아 query를 재확장합니다.
+`rag.multimodalRetrievalEnabled=true`는 web ingest가 수집한 이미지 alt/table snippet 힌트를 검색 점수에 반영합니다.
+`rag.lateInteractionEnabled=true`는 top candidate 내부 sub-window를 재임베딩해 late-interaction 스타일 보정 점수를 추가합니다.
+
+FalkorDB를 직접 실행할 때는 보통 아래처럼 띄웁니다.
+
+```bash
+docker run -p 6379:6379 -p 3000:3000 -it --rm falkordb/falkordb:latest
+```
+
+그래프 탐색 화면은 `/rag-admin/graph`에서 볼 수 있고, 문서 ingest와 delete 흐름은 기존 Lucene 인덱스와 함께 graph projection도 갱신합니다.
 
 ### Provider Health Export
 
@@ -117,6 +153,8 @@ provider health export는 운영형 기능입니다.
 - dead-letter
 - async queue
 - HMAC signature header
+- export payload delivery results
+- queue/backpressure counters
 
 예시:
 

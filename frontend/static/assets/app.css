@@ -72,7 +72,8 @@ body.modal-open {
 }
 
 .brand {
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 12px;
 }
 
@@ -152,12 +153,12 @@ h3 {
 
 .nav-menu {
   display: grid;
-  gap: 16px;
+  gap: 8px;
 }
 
 .nav-group {
   display: grid;
-  gap: 10px;
+  gap: 6px;
 }
 
 .nav-group-title {
@@ -165,13 +166,14 @@ h3 {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: rgba(229, 238, 252, 0.42);
+  margin-bottom: 4px;
 }
 
 .nav-link {
   display: grid;
   gap: 4px;
-  padding: 12px 14px;
-  border-radius: 16px;
+  padding: 8px 12px;
+  border-radius: 12px;
   border: 1px solid transparent;
   text-decoration: none;
   color: rgba(229, 238, 252, 0.84);
@@ -192,11 +194,11 @@ h3 {
 
 .nav-link-title {
   font-weight: 700;
+  font-size: 0.92rem;
 }
 
 .nav-link-meta {
-  font-size: 0.82rem;
-  color: rgba(229, 238, 252, 0.54);
+  display: none;
 }
 
 .sidebar-meta {
@@ -701,10 +703,86 @@ tbody tr:hover {
   background: #fbfcff;
 }
 
-.helper {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.92rem;
+.help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  color: var(--muted-strong);
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: help;
+  position: relative;
+  margin-left: 8px;
+}
+
+.help-icon:hover {
+  background: var(--accent);
+  color: white;
+}
+
+.tooltip {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  width: 320px;
+  padding: 16px;
+  margin-top: 10px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  visibility: hidden;
+  opacity: 0;
+  transition: 160ms ease;
+  pointer-events: none;
+}
+
+.help-icon:hover .tooltip {
+  visibility: visible;
+  opacity: 1;
+}
+
+.tooltip h3 {
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.tooltip p {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--muted-strong);
+  margin: 0 0 12px;
+}
+
+.tooltip p:last-child {
+  margin-bottom: 0;
+}
+
+.tooltip::before {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 8px solid transparent;
+  border-bottom-color: var(--line);
+}
+
+.tooltip::after {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 7px solid transparent;
+  border-bottom-color: var(--surface);
 }
 
 .mono {
@@ -1071,6 +1149,19 @@ tbody tr:hover {
   font-weight: 700;
 }
 
+button.mini-chip.graph-action {
+  appearance: none;
+  cursor: pointer;
+  background: #eef2ff;
+  border: 1px solid #dbe3ff;
+  color: var(--accent-strong);
+  box-shadow: none;
+}
+
+button.mini-chip.graph-action:hover {
+  background: #e0e7ff;
+}
+
 .data-card-body mark.exact-match-token {
   padding: 0 0.18em;
   border-radius: 0.35em;
@@ -1199,6 +1290,85 @@ tbody tr:hover {
   gap: 12px;
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.graph-canvas {
+  position: relative;
+  min-height: 520px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(circle at top right, rgba(79, 70, 229, 0.08), transparent 26%),
+    linear-gradient(180deg, #ffffff, #f8fbff);
+  overflow: hidden;
+}
+
+.graph-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.graph-cytoscape {
+  width: 100%;
+  height: 520px;
+}
+
+.graph-edge {
+  stroke: rgba(79, 70, 229, 0.35);
+  stroke-width: 1.5;
+}
+
+.graph-node {
+  cursor: pointer;
+}
+
+.graph-node-circle {
+  fill: rgba(79, 70, 229, 0.14);
+  stroke: rgba(79, 70, 229, 0.5);
+  stroke-width: 1.5;
+}
+
+.graph-node.kind-document .graph-node-circle {
+  fill: rgba(34, 197, 94, 0.16);
+  stroke: rgba(34, 197, 94, 0.58);
+}
+
+.graph-node.kind-entity .graph-node-circle {
+  fill: rgba(249, 115, 22, 0.16);
+  stroke: rgba(249, 115, 22, 0.58);
+}
+
+.graph-node.kind-principal .graph-node-circle,
+.graph-node.kind-tenant .graph-node-circle {
+  fill: rgba(99, 102, 241, 0.16);
+  stroke: rgba(99, 102, 241, 0.58);
+}
+
+.graph-node.selected .graph-node-circle {
+  filter: drop-shadow(0 0 10px rgba(79, 70, 229, 0.28));
+  stroke-width: 2.5;
+}
+
+.graph-node-label,
+.graph-node-kind {
+  font-size: 10px;
+  fill: var(--text);
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.graph-node-label {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.graph-node-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  opacity: 0.78;
 }
 
 .timeline {

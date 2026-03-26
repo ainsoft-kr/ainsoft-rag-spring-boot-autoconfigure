@@ -3,6 +3,8 @@ package com.ainsoft.rag.spring
 import com.ainsoft.rag.api.RagConfig
 import com.ainsoft.rag.api.RagEngine
 import com.ainsoft.rag.embeddings.EmbeddingProvider
+import com.ainsoft.rag.graph.GraphProjectionService
+import com.ainsoft.rag.graph.GraphStore
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass
@@ -12,6 +14,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 
 @AutoConfiguration(after = [RagAutoConfiguration::class])
 @ConditionalOnClass(name = ["org.springframework.web.servlet.DispatcherServlet"])
@@ -20,6 +24,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 @ConditionalOnProperty(prefix = "rag.admin", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 @EnableConfigurationProperties(RagAdminProperties::class)
 class RagAdminAutoConfiguration {
+
+    @Bean(destroyMethod = "close")
+    @ConditionalOnMissingBean(name = ["ragAdminStreamExecutor"])
+    fun ragAdminStreamExecutor(): Executor = Executors.newVirtualThreadPerTaskExecutor()
 
     @Bean
     @ConditionalOnMissingBean
@@ -43,13 +51,17 @@ class RagAdminAutoConfiguration {
         properties: RagProperties,
         adminProperties: RagAdminProperties,
         ragConfig: RagConfig,
-        embeddingProvider: EmbeddingProvider
+        embeddingProvider: EmbeddingProvider,
+        graphStore: GraphStore,
+        graphProjectionService: GraphProjectionService
     ): RagAdminService = RagAdminService(
         engine = engine,
         properties = properties,
         adminProperties = adminProperties,
         ragConfig = ragConfig,
-        embeddingProvider = embeddingProvider
+        embeddingProvider = embeddingProvider,
+        graphStore = graphStore,
+        graphProjectionService = graphProjectionService
     )
 
     @Bean
@@ -84,7 +96,8 @@ class RagAdminAutoConfiguration {
         embeddingProvider: EmbeddingProvider,
         adminService: RagAdminService,
         securityService: RagAdminSecurityService,
-        accountManagementService: RagAdminAccountManagementService
+        accountManagementService: RagAdminAccountManagementService,
+        ragAdminStreamExecutor: Executor
     ): RagAdminApiController = RagAdminApiController(
         engine = engine,
         properties = properties,
@@ -92,8 +105,14 @@ class RagAdminAutoConfiguration {
         embeddingProvider = embeddingProvider,
         adminService = adminService,
         securityService = securityService,
-        accountManagementService = accountManagementService
+        accountManagementService = accountManagementService,
+        streamExecutor = ragAdminStreamExecutor
     )
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun graphAdminApiController(graphStore: GraphStore): GraphAdminApiController =
+        GraphAdminApiController(graphStore)
 
     @Bean
     @ConditionalOnMissingBean

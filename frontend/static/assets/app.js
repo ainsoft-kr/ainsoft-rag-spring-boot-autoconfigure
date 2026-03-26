@@ -2,6 +2,10 @@
   const config = window.RAG_ADMIN_CONFIG || {
     basePath: "/rag-admin",
     apiBasePath: "/api/rag/admin",
+    defaultTenantId: "tenant-admin",
+    defaultAclPrincipals: ["group:admin"],
+    defaultSearchPrincipals: ["group:admin"],
+    defaultSearchQuery: "hybrid retrieval",
     defaultRecentProviderWindowMillis: 60000,
     securityEnabled: false,
     currentRole: "ADMIN",
@@ -18,6 +22,7 @@
     { route: "job-history", feature: "job-history", label: "Job History", caption: "Runbook queue", section: "Monitor", board: "Execution Tape" },
     { route: "search", feature: "search", label: "Search", caption: "Diagnostic retrieval", section: "Retrieval", board: "Search Desk" },
     { route: "documents", feature: "documents", label: "Documents", caption: "Browser and preview", section: "Retrieval", board: "Document Ledger" },
+    { route: "graph", feature: "graph", label: "Graph", caption: "Document and entity relationships", section: "Retrieval", board: "Graph Explorer" },
     { route: "text-ingest", feature: "text-ingest", label: "Text Ingest", caption: "Direct upsert", section: "Ingest", board: "Manual Ingest" },
     { route: "file-ingest", feature: "file-ingest", label: "File Ingest", caption: "Upload pipeline", section: "Ingest", board: "Upload Ingest" },
     { route: "web-ingest", feature: "web-ingest", label: "Web Ingest", caption: "Site crawl ingest", section: "Ingest", board: "Web Crawler" },
@@ -28,6 +33,7 @@
     { route: "users", feature: "users", label: "Users", caption: "Accounts and passwords", section: "Operations", board: "User Vault" }
   ];
   const storageKey = "rag-admin-shared-context";
+  const legacyDefaultTenantId = "tenant-admin";
 
   function parseList(value) {
     return String(value || "")
@@ -123,20 +129,50 @@
 
   function defaultContext() {
     return {
-      tenantId: "tenant-admin",
+      tenantId: config.defaultTenantId || legacyDefaultTenantId,
       recentProviderWindowMillis: config.defaultRecentProviderWindowMillis
     };
   }
 
   function normalizeContext(input) {
+    const normalizedTenantId = typeof input.tenantId === "string" && input.tenantId.trim()
+      ? input.tenantId.trim()
+      : "";
     return {
-      tenantId: typeof input.tenantId === "string" && input.tenantId.trim()
-        ? input.tenantId.trim()
-        : "tenant-admin",
+      tenantId:
+        normalizedTenantId && !(normalizedTenantId === legacyDefaultTenantId && (config.defaultTenantId || legacyDefaultTenantId) !== legacyDefaultTenantId)
+          ? normalizedTenantId
+          : (config.defaultTenantId || legacyDefaultTenantId),
       recentProviderWindowMillis: Number(
         input.recentProviderWindowMillis || config.defaultRecentProviderWindowMillis
       )
     };
+  }
+
+  function formatInlineList(values) {
+    return (values || []).map((value) => String(value || "").trim()).filter(Boolean).join(", ");
+  }
+
+  function formatMultilineList(values) {
+    return (values || []).map((value) => String(value || "").trim()).filter(Boolean).join("\n");
+  }
+
+  function setConfiguredValue(id, value, legacyValues = []) {
+    const node = document.getElementById(id);
+    if (!node || value == null) return;
+    const normalizedValue = String(value);
+    const currentValue = String(node.value || "");
+    if (!currentValue.trim() || legacyValues.includes(currentValue)) {
+      node.value = normalizedValue;
+    }
+  }
+
+  function applyConfiguredDefaults() {
+    setConfiguredValue("search-principals", formatInlineList(config.defaultSearchPrincipals), ["group:admin"]);
+    setConfiguredValue("search-query", config.defaultSearchQuery || "hybrid retrieval", ["hybrid retrieval"]);
+    setConfiguredValue("ingest-acl", formatInlineList(config.defaultAclPrincipals), ["group:admin"]);
+    setConfiguredValue("upload-acl", formatInlineList(config.defaultAclPrincipals), ["group:admin"]);
+    setConfiguredValue("web-acl", formatMultilineList(config.defaultAclPrincipals), ["group:admin"]);
   }
 
   function loadContext() {
@@ -1006,6 +1042,468 @@
     target.appendChild(toolbar);
     target.appendChild(wrapper);
     renderRows();
+  }
+
+  function normalizeRelationFilters(value) {
+    return parseList(value).map((item) => item.toLowerCase());
+  }
+
+  const graphInstances = new Map();
+
+  function destroyGraphInstance(containerId) {
+    const existing = graphInstances.get(containerId);
+    if (existing && typeof existing.destroy === "function") {
+      existing.destroy();
+    }
+    graphInstances.delete(containerId);
+  }
+
+  function graphLayoutOptions(nodeCount, edgeCount, selectedNodeId) {
+    const layout = document.getElementById("graph-layout")?.value || "cose";
+    const scale = document.getElementById("graph-scale")?.value || "normal";
+    const preset = document.getElementById("graph-preset")?.value || "explore";
+    const density = nodeCount > 0 ? edgeCount / nodeCount : 0;
+    const scaleFactor = scale === "dense" ? 0.85 : scale === "compact" ? 0.72 : 1;
+    const presetScale = preset === "dense" ? 0.8 : preset === "path" ? 1.1 : preset === "entity" ? 0.92 : 1;
+    const pull = Math.max(60, Math.min(220, Math.round((110 + density * 10) * scaleFactor * presetScale)));
+    const repulsion = Math.max(3200, Math.min(20000, Math.round((7000 + nodeCount * 650) / (scaleFactor * presetScale))));
+    const iterations = Math.max(240, Math.min(1600, Math.round((700 + nodeCount * 18) * scaleFactor * presetScale)));
+    const elastic = Math.max(16, Math.min(104, Math.round((34 + density * 4) * scaleFactor * presetScale)));
+    if (layout === "circle") {
+      return {
+        name: "circle",
+        fit: true,
+        padding: 52,
+        animate: nodeCount <= 80
+      };
+    }
+    if (layout === "concentric") {
+      return {
+        name: "concentric",
+        fit: true,
+        padding: 52,
+        animate: nodeCount <= 80,
+        concentric: (node) => (node.data("kind") === "DOCUMENT" ? 5 : node.data("kind") === "ENTITY" ? 4 : 3),
+        levelWidth: () => 1
+      };
+    }
+    if (layout === "grid") {
+      return {
+        name: "grid",
+        fit: true,
+        padding: 52,
+        avoidOverlap: true,
+        animate: false,
+        rows: Math.max(1, Math.ceil(Math.sqrt(nodeCount))),
+        cols: Math.max(1, Math.ceil(Math.sqrt(nodeCount)))
+      };
+    }
+    return {
+      name: "cose",
+      animate: nodeCount <= 120,
+      animationDuration: 420,
+      fit: true,
+      padding: 52,
+      randomize: nodeCount > 14,
+      nodeRepulsion: repulsion,
+      idealEdgeLength: pull,
+      edgeElasticity: elastic,
+      nestingFactor: 0.95,
+      gravity: 0.18,
+      numIter: iterations,
+      initialTemp: 900,
+      coolingFactor: 0.95,
+      minTemp: 1.0
+    };
+  }
+
+  function applyGraphPreset(presetName) {
+    const preset = String(presetName || "explore").toLowerCase();
+    const layout = document.getElementById("graph-layout");
+    const scale = document.getElementById("graph-scale");
+    const relation = document.getElementById("graph-relation-filter");
+    const depth = document.getElementById("graph-depth");
+    if (preset === "dense") {
+      if (layout) layout.value = "concentric";
+      if (scale) scale.value = "dense";
+      if (relation) relation.value = "";
+      if (depth) depth.value = "2";
+      return;
+    }
+    if (preset === "path") {
+      if (layout) layout.value = "circle";
+      if (scale) scale.value = "compact";
+      if (relation) relation.value = "MENTIONS,RELATED_TO,CITES";
+      if (depth) depth.value = "3";
+      return;
+    }
+    if (preset === "entity") {
+      if (layout) layout.value = "grid";
+      if (scale) scale.value = "dense";
+      if (relation) relation.value = "MENTIONS,RELATED_TO";
+      if (depth) depth.value = "2";
+      return;
+    }
+    if (layout) layout.value = "cose";
+    if (scale) scale.value = "normal";
+    if (relation) relation.value = "";
+    if (depth) depth.value = "1";
+  }
+
+  function renderGraphCanvas(containerId, subgraph, selectedNodeId, onSelectNode, relationFilter) {
+    const target = document.getElementById(containerId);
+    if (!target) return;
+    target.replaceChildren();
+    destroyGraphInstance(containerId);
+
+    const nodes = Array.isArray(subgraph?.nodes) ? subgraph.nodes : [];
+    const edges = Array.isArray(subgraph?.edges) ? subgraph.edges : [];
+    const relationFilters = normalizeRelationFilters(relationFilter);
+    const visibleEdges = relationFilters.length
+      ? edges.filter((edge) => relationFilters.includes(String(edge.relationType || "").toLowerCase()))
+      : edges;
+    if (!nodes.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No graph data";
+      target.appendChild(empty);
+      return;
+    }
+
+    if (typeof window.cytoscape === "function") {
+      const cyHost = document.createElement("div");
+      cyHost.className = "graph-cytoscape";
+      target.appendChild(cyHost);
+
+      const cy = window.cytoscape({
+        container: cyHost,
+        elements: [
+          ...nodes.map((node) => ({
+            data: {
+              id: node.id,
+              label: node.label || node.id,
+              kind: node.kind || "",
+              tenantId: node.tenantId || "",
+              ...node.properties
+            },
+            classes: `kind-${String(node.kind || "").toLowerCase()}`
+          })),
+          ...visibleEdges.map((edge) => ({
+            data: {
+              id: edge.id,
+              source: edge.fromId,
+              target: edge.toId,
+              label: edge.relationType || "",
+              relationType: edge.relationType || "",
+              tenantId: edge.tenantId || "",
+              ...edge.properties
+            },
+            classes: `relation-${String(edge.relationType || "").toLowerCase()}`
+          }))
+        ],
+        style: [
+          {
+            selector: "node",
+            style: {
+              label: "data(label)",
+              color: "#111827",
+              "font-size": 10,
+              "text-wrap": "wrap",
+              "text-max-width": 120,
+              "background-color": "#4f46e5",
+              "border-width": 2,
+              "border-color": "#a5b4fc",
+              width: 34,
+              height: 34
+            }
+          },
+          {
+            selector: "node.kind-document",
+            style: {
+              "background-color": "#22c55e",
+              "border-color": "#86efac",
+              width: 42,
+              height: 42
+            }
+          },
+          {
+            selector: "node.kind-entity",
+            style: {
+              "background-color": "#f97316",
+              "border-color": "#fdba74",
+              width: 36,
+              height: 36
+            }
+          },
+          {
+            selector: "node.kind-principal, node.kind-tenant",
+            style: {
+              "background-color": "#6366f1",
+              "border-color": "#a5b4fc"
+            }
+          },
+          {
+            selector: "node.selected",
+            style: {
+              "border-width": 4,
+              "border-color": "#111827",
+              "overlay-opacity": 0.08,
+              "overlay-color": "#4f46e5"
+            }
+          },
+          {
+            selector: "edge",
+            style: {
+              width: 1.8,
+              "curve-style": "bezier",
+              "target-arrow-shape": "triangle",
+              "target-arrow-color": "#4f46e5",
+              "line-color": "#93c5fd",
+              "arrow-scale": 0.85,
+              label: "data(label)",
+              "font-size": 9,
+              color: "#334155",
+              "text-background-color": "#ffffff",
+              "text-background-opacity": 0.85,
+              "text-background-padding": 2
+            }
+          },
+          {
+            selector: "edge.selected",
+            style: {
+              width: 3,
+              "line-color": "#1d4ed8",
+              "target-arrow-color": "#1d4ed8"
+            }
+          }
+        ],
+        layout: graphLayoutOptions(nodes.length, visibleEdges.length, selectedNodeId),
+        wheelSensitivity: 0.2,
+        minZoom: 0.2,
+        maxZoom: 2.8
+      });
+      graphInstances.set(containerId, cy);
+      const nodeSet = new Set(nodes.map((node) => node.id));
+      if (selectedNodeId && nodeSet.has(selectedNodeId)) {
+        cy.$id(selectedNodeId).addClass("selected");
+      }
+      cy.once("layoutstop", () => {
+        if (selectedNodeId && nodeSet.has(selectedNodeId)) {
+          const selected = cy.$id(selectedNodeId);
+          if (selected) {
+            cy.center(selected);
+            cy.fit(selected, 80);
+          }
+        } else {
+          cy.fit(undefined, 48);
+        }
+      });
+      cy.on("tap", "node", (event) => {
+        const nodeId = event.target.id();
+        cy.nodes().removeClass("selected");
+        event.target.addClass("selected");
+        if (typeof onSelectNode === "function") {
+          onSelectNode(nodeId);
+        }
+      });
+      cy.on("tap", "edge", (event) => {
+        cy.edges().removeClass("selected");
+        event.target.addClass("selected");
+        if (typeof onSelectNode === "function") {
+          const sourceId = event.target.data("source");
+          if (sourceId && nodeSet.has(sourceId)) {
+            onSelectNode(sourceId);
+          }
+        }
+      });
+      cy.on("tap", (event) => {
+        if (event.target === cy) {
+          cy.nodes().removeClass("selected");
+          cy.edges().removeClass("selected");
+        }
+      });
+      cy.on("mouseover", "node", (event) => event.target.style("z-index", 999));
+      cy.on("mouseout", "node", (event) => event.target.style("z-index", 0));
+      return;
+    }
+
+    const width = 840;
+    const height = 520;
+    const radius = Math.max(Math.min(width, height) / 2 - 96, 140);
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const orderedNodes = [...nodes].sort((left, right) => String(left.kind || left.label || left.id).localeCompare(String(right.kind || right.label || right.id)));
+    const positions = new Map();
+    orderedNodes.forEach((node, index) => {
+      const angle = (Math.PI * 2 * index) / orderedNodes.length - Math.PI / 2;
+      const x = Math.round((centerX + Math.cos(angle) * radius) * 100) / 100;
+      const y = Math.round((centerY + Math.sin(angle) * radius) * 100) / 100;
+      positions.set(node.id, { x, y });
+    });
+
+    const nodeById = new Map(orderedNodes.map((node) => [node.id, node]));
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("class", "graph-svg");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "Graph visualization");
+
+    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+    marker.setAttribute("id", "graph-arrow");
+    marker.setAttribute("viewBox", "0 0 10 10");
+    marker.setAttribute("refX", "8");
+    marker.setAttribute("refY", "5");
+    marker.setAttribute("markerWidth", "6");
+    marker.setAttribute("markerHeight", "6");
+    marker.setAttribute("orient", "auto-start-reverse");
+    const markerPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    markerPath.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
+    markerPath.setAttribute("fill", "rgba(79, 70, 229, 0.75)");
+    marker.appendChild(markerPath);
+    defs.appendChild(marker);
+    svg.appendChild(defs);
+
+    visibleEdges.forEach((edge) => {
+      const from = positions.get(edge.fromId);
+      const to = positions.get(edge.toId);
+      if (!from || !to) return;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", from.x);
+      line.setAttribute("y1", from.y);
+      line.setAttribute("x2", to.x);
+      line.setAttribute("y2", to.y);
+      line.setAttribute("class", "graph-edge");
+      line.setAttribute("marker-end", "url(#graph-arrow)");
+      svg.appendChild(line);
+    });
+
+    orderedNodes.forEach((node) => {
+      const pos = positions.get(node.id);
+      if (!pos) return;
+      const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      group.setAttribute("class", `graph-node kind-${String(node.kind || "").toLowerCase()}${selectedNodeId && selectedNodeId === node.id ? " selected" : ""}`);
+      group.setAttribute("transform", `translate(${pos.x},${pos.y})`);
+      group.addEventListener("click", () => {
+        if (typeof onSelectNode === "function") {
+          onSelectNode(node.id);
+        }
+      });
+
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.setAttribute("r", String(node.kind === "DOCUMENT" ? 24 : node.kind === "ENTITY" ? 20 : 16));
+      circle.setAttribute("class", "graph-node-circle");
+      group.appendChild(circle);
+
+      const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      title.setAttribute("class", "graph-node-label");
+      title.setAttribute("text-anchor", "middle");
+      title.setAttribute("y", "40");
+      title.textContent = String(node.label || node.id);
+      group.appendChild(title);
+
+      const kind = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      kind.setAttribute("class", "graph-node-kind");
+      kind.setAttribute("text-anchor", "middle");
+      kind.setAttribute("y", "-30");
+      kind.textContent = String(node.kind || "");
+      group.appendChild(kind);
+
+      svg.appendChild(group);
+    });
+
+    target.appendChild(svg);
+  }
+
+  function renderGraphInspector(containerId, subgraph, selectedNodeId, onSelectNode) {
+    const nodes = Array.isArray(subgraph?.nodes) ? subgraph.nodes : [];
+    const edges = Array.isArray(subgraph?.edges) ? subgraph.edges : [];
+    const selected = nodes.find((node) => node.id === selectedNodeId) || nodes[0];
+    if (!selected) {
+      renderDataCards(containerId, []);
+      return;
+    }
+    const inbound = edges.filter((edge) => edge.toId === selected.id).slice(0, 4).map((edge) => `${edge.relationType} ← ${edge.fromId}`);
+    const outbound = edges.filter((edge) => edge.fromId === selected.id).slice(0, 4).map((edge) => `${edge.relationType} → ${edge.toId}`);
+    const actionButtons = `
+      <div class="chip-row">
+        <button type="button" class="mini-chip graph-action" data-graph-action="root" data-node-id="${escapeHtml(selected.id)}">Use as Root</button>
+        <button type="button" class="mini-chip graph-action" data-graph-action="focus" data-node-id="${escapeHtml(selected.id)}">Focus Path Start</button>
+      </div>
+    `;
+    renderDataCards(containerId, [
+      {
+        title: selected.label || selected.id,
+        meta: `${selected.kind || "-"} · ${selected.id}`,
+        bodyHtml: `
+          <div>${Object.entries(selected.properties || {}).map(([key, value]) => `${escapeHtml(key)}=${escapeHtml(value)}`).join(", ") || "No properties"}</div>
+          ${actionButtons}
+        `,
+        chips: [selected.kind || "NODE", ...(selected.properties ? Object.keys(selected.properties).slice(0, 3) : [])]
+      },
+      {
+        title: "Inbound",
+        meta: `${inbound.length} edges`,
+        body: inbound.join(", ") || "No inbound edges",
+        chips: inbound.slice(0, 3)
+      },
+      {
+        title: "Outbound",
+        meta: `${outbound.length} edges`,
+        body: outbound.join(", ") || "No outbound edges",
+        chips: outbound.slice(0, 3)
+      }
+    ]);
+    const target = document.getElementById(containerId);
+    target?.querySelectorAll("[data-graph-action]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const nodeId = button.getAttribute("data-node-id") || selected.id;
+        const action = button.getAttribute("data-graph-action");
+        if (typeof onSelectNode === "function" && nodeId) {
+          onSelectNode(nodeId, action);
+        }
+      });
+    });
+  }
+
+  function summarizeGraphStats(stats) {
+    const nodes = Number(stats?.nodes || 0);
+    const edges = Number(stats?.edges || 0);
+    const documents = Number(stats?.documents || 0);
+    const entities = Number(stats?.entities || 0);
+    const principals = Number(stats?.principals || 0);
+    const sources = Number(stats?.sources || 0);
+    renderAnalyticsCards("graph-analytics", [
+      { label: "Nodes", meta: stats?.tenantId || "All", value: formatCompactNumber(nodes), series: [nodes, edges, documents], foot: "Graph nodes" },
+      { label: "Edges", meta: "Topology", value: formatCompactNumber(edges), series: [edges, entities, principals], foot: "Graph edges" },
+      { label: "Documents", meta: "Corpus", value: formatCompactNumber(documents), series: [documents, sources], foot: "Document nodes" },
+      { label: "Entities", meta: "Extracted", value: formatCompactNumber(entities), series: [entities, principals], foot: "Entity nodes" }
+    ]);
+    renderBarList("graph-bars", [
+      { label: "Principals", valueLabel: `${principals} nodes`, ratio: Math.max(8, Math.min(100, principals ? 100 : 8)), warn: false },
+      { label: "Sources", valueLabel: `${sources} nodes`, ratio: Math.max(8, Math.min(100, sources ? 100 : 8)), warn: false }
+    ]);
+  }
+
+  function buildPathGraph(pathNodes) {
+    const nodes = Array.isArray(pathNodes) ? pathNodes : [];
+    const edges = [];
+    nodes.slice(0, -1).forEach((node, index) => {
+      const next = nodes[index + 1];
+      if (!node || !next) return;
+      edges.push({
+        id: `${node.id}->${next.id}#PATH`,
+        fromId: node.id,
+        toId: next.id,
+        relationType: "PATH",
+        tenantId: node.tenantId || next.tenantId || ""
+      });
+    });
+    return {
+      centerNodeId: nodes[0]?.id || "",
+      nodes,
+      edges
+    };
   }
 
   function populateSelect(id, items, selectedValue) {
@@ -2016,6 +2514,24 @@
       );
     }
 
+    function splitSseBlock(block) {
+      const lines = block
+        .split(/\r?\n/)
+        .map((line) => line.trimEnd())
+        .filter(Boolean);
+      const event = { event: "message", data: [] };
+
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          event.event = line.slice(6).trim() || "message";
+        } else if (line.startsWith("data:")) {
+          event.data.push(line.slice(5).trimStart());
+        }
+      }
+
+      return event.data.length ? { event: event.event, data: event.data.join("\n") } : null;
+    }
+
     function webIngestPayload() {
       return {
         tenantId: currentTenant(),
@@ -2025,6 +2541,8 @@
         metadata: parseMap(document.getElementById("web-metadata")?.value),
         respectRobotsTxt: Boolean(document.getElementById("web-respect-robots")?.checked),
         incrementalIngest: Boolean(document.getElementById("web-incremental")?.checked),
+        sourceLoadProfile: document.getElementById("web-source-load-profile")?.value?.trim() || null,
+        userAgent: document.getElementById("web-user-agent")?.value?.trim() || "AinsoftRagBot/1.0",
         maxPages: Number(document.getElementById("web-max-pages")?.value || 25),
         maxDepth: Number(document.getElementById("web-max-depth")?.value || 1),
         sameHostOnly: Boolean(document.getElementById("web-same-host")?.checked),
@@ -2082,29 +2600,38 @@
           method: "POST",
           credentials: "same-origin",
           headers: {
-            Accept: "text/plain",
+            Accept: "text/event-stream",
             "Content-Type": "application/json"
           },
           body: JSON.stringify(payload),
           signal: controller.signal
         });
 
+        const contentType = response.headers.get("content-type") || "";
         if (!response.ok || !response.body) {
           throw new Error(`Request failed with ${response.status}`);
+        }
+        if (!contentType.includes("text/event-stream")) {
+          throw new Error("Streaming response was not text/event-stream.");
         }
 
         const decoder = new TextDecoder();
         const reader = response.body.getReader();
         let buffer = "";
+        let currentBlock = "";
         let finalResult = null;
+        let sawTerminalEnvelope = false;
 
-        const flushLine = (line) => {
-          if (!line.trim()) {
+        const flushEvent = (parsedEvent) => {
+          if (!parsedEvent) {
             return;
           }
-          const event = JSON.parse(line);
+          const event = JSON.parse(parsedEvent.data);
           if (event.type === "progress" && event.event) {
             lastProgressEvents.push(event.event);
+            if (["sitemap", "robots", "fetch", "skip", "ingest-failed"].includes(event.event.phase)) {
+              setNotice("web-notice", event.event.message || "web ingest issue detected", false);
+            }
             renderDataCards("web-progress-summary", [
               {
                 title: "Seed URLs",
@@ -2151,6 +2678,10 @@
             );
           } else if (event.type === "result" && event.response) {
             finalResult = event.response;
+            sawTerminalEnvelope = true;
+          } else if (event.type === "done" && event.response) {
+            finalResult = event.response;
+            sawTerminalEnvelope = true;
           } else if (event.type === "error") {
             throw new Error(event.message || "web ingest failed");
           }
@@ -2160,17 +2691,21 @@
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          let newlineIndex = buffer.indexOf("\n");
-          while (newlineIndex >= 0) {
-            const line = buffer.slice(0, newlineIndex);
-            buffer = buffer.slice(newlineIndex + 1);
-            flushLine(line);
-            newlineIndex = buffer.indexOf("\n");
+          const chunks = buffer.split(/\r?\n/);
+          buffer = chunks.pop() || "";
+          for (const line of chunks) {
+            if (line === "") {
+              flushEvent(splitSseBlock(currentBlock));
+              currentBlock = "";
+            } else {
+              currentBlock += `${line}\n`;
+            }
           }
         }
-        const tail = buffer.trim();
+        buffer += decoder.decode();
+        const tail = [currentBlock, buffer].filter(Boolean).join("\n");
         if (tail) {
-          flushLine(tail);
+          flushEvent(splitSseBlock(tail));
         }
 
         if (controller.signal.aborted) {
@@ -2178,7 +2713,21 @@
           return;
         }
         if (!finalResult) {
-          throw new Error("web ingest stream closed before a final result was received");
+          finalResult = {
+            status: sawTerminalEnvelope ? "partial" : "partial",
+            crawledPages: lastProgressEvents.filter((item) => item.phase === "crawl").length,
+            ingestedPages: lastProgressEvents.filter((item) => item.phase === "ingest").length,
+            changedPages: lastProgressEvents.filter((item) => item.phase === "changed").length,
+            skippedPages: lastProgressEvents.filter((item) => item.phase === "skip-existing").length,
+            progress: lastProgressEvents,
+            results: [],
+            failures: []
+          };
+          setNotice(
+            "web-notice",
+            "web ingest finished without a final result envelope; showing partial progress",
+            false
+          );
         }
 
         lastResult = finalResult;
@@ -2455,6 +3004,163 @@
     document.getElementById("btn-document-reindex")?.addEventListener("click", () => run("documents-notice", reindexDocument));
     document.getElementById("btn-document-delete")?.addEventListener("click", () => run("documents-notice", deleteDocument));
     run("documents-notice", refreshDocuments);
+  }
+
+  function initGraph() {
+    let lastSubgraph = null;
+    let selectedNodeId = null;
+
+    function currentGraphRelationFilter() {
+      return document.getElementById("graph-relation-filter")?.value || "";
+    }
+
+    function syncSelection(nodeId, action) {
+      if (!nodeId) return;
+      selectedNodeId = nodeId;
+      const rootInput = document.getElementById("graph-root-id");
+      const pathFromInput = document.getElementById("graph-path-from");
+      if (rootInput) rootInput.value = nodeId;
+      if (pathFromInput) pathFromInput.value = nodeId;
+      if (lastSubgraph) {
+        renderGraphCanvas("graph-canvas", lastSubgraph, selectedNodeId, syncSelection, currentGraphRelationFilter());
+        renderGraphInspector("graph-node-cards", lastSubgraph, selectedNodeId, syncSelection);
+      }
+      const noticeAction = action === "root" ? "root" : action === "focus" ? "path start" : "node";
+      setNotice("graph-notice", `selected ${noticeAction} ${nodeId}`, false);
+    }
+
+    function renderGraphView(response) {
+      lastSubgraph = response;
+      selectedNodeId = response?.centerNodeId || response?.nodes?.[0]?.id || selectedNodeId;
+      renderGraphCanvas("graph-canvas", response, selectedNodeId, syncSelection, currentGraphRelationFilter());
+      renderGraphInspector("graph-node-cards", response, selectedNodeId, syncSelection);
+    }
+
+    async function loadStats() {
+      const tenantId = currentTenant();
+      const params = new URLSearchParams();
+      if (tenantId) params.set("tenantId", tenantId);
+      const response = await request(`/graph/stats?${params.toString()}`, { method: "GET" });
+      renderJson("output-graph-stats", response);
+      summarizeGraphStats(response);
+      setNotice("graph-notice", `loaded graph stats for ${tenantId || "all tenants"}`, false);
+    }
+
+    async function loadDocumentGraph() {
+      const tenantId = document.getElementById("graph-tenant-id")?.value?.trim() || currentTenant();
+      const docId = document.getElementById("graph-doc-id")?.value?.trim() || "";
+      const depth = document.getElementById("graph-depth")?.value || "1";
+      if (!tenantId || !docId) throw new Error("tenantId and docId are required");
+      const params = new URLSearchParams();
+      params.set("depth", depth);
+      const response = await request(`/graph/document/${encodeSegment(tenantId)}/${encodeSegment(docId)}?${params.toString()}`, { method: "GET" });
+      renderJson("output-graph-document", response);
+      renderGraphView(response);
+      setNotice("graph-notice", `loaded document graph for ${docId}`, false);
+    }
+
+    async function loadEntityGraph() {
+      const tenantId = document.getElementById("graph-tenant-id")?.value?.trim() || currentTenant();
+      const entityId = document.getElementById("graph-entity-id")?.value?.trim() || "";
+      const depth = document.getElementById("graph-depth")?.value || "1";
+      if (!tenantId || !entityId) throw new Error("tenantId and entityId are required");
+      const params = new URLSearchParams();
+      params.set("depth", depth);
+      const response = await request(`/graph/entity/${encodeSegment(tenantId)}/${encodeSegment(entityId)}?${params.toString()}`, { method: "GET" });
+      renderJson("output-graph-entity", response);
+      renderGraphView(response);
+      setNotice("graph-notice", `loaded entity graph for ${entityId}`, false);
+    }
+
+    async function loadSubgraph() {
+      const tenantId = document.getElementById("graph-tenant-id")?.value?.trim() || currentTenant();
+      const rootId = document.getElementById("graph-root-id")?.value?.trim() || "";
+      const depth = document.getElementById("graph-depth")?.value || "1";
+      if (!tenantId || !rootId) throw new Error("tenantId and rootId are required");
+      const params = new URLSearchParams();
+      params.set("tenantId", tenantId);
+      params.set("rootId", rootId);
+      params.set("depth", depth);
+      const response = await request(`/graph/subgraph?${params.toString()}`, { method: "GET" });
+      renderJson("output-graph-subgraph", response);
+      renderGraphView(response);
+      setNotice("graph-notice", `loaded subgraph from ${rootId}`, false);
+    }
+
+    async function loadPath() {
+      const tenantId = document.getElementById("graph-tenant-id")?.value?.trim() || currentTenant();
+      const from = document.getElementById("graph-path-from")?.value?.trim() || selectedNodeId || "";
+      const to = document.getElementById("graph-path-to")?.value?.trim() || "";
+      const depth = document.getElementById("graph-depth")?.value || "4";
+      if (!tenantId || !from || !to) throw new Error("tenantId, from, and to are required");
+      const params = new URLSearchParams();
+      params.set("tenantId", tenantId);
+      params.set("from", from);
+      params.set("to", to);
+      params.set("depth", depth);
+      const response = await request(`/graph/path?${params.toString()}`, { method: "GET" });
+      const pathGraph = buildPathGraph(response);
+      renderJson("output-graph-path", pathGraph);
+      renderGraphView(pathGraph);
+      setNotice("graph-notice", `loaded path from ${from} to ${to}`, false);
+    }
+
+    document.getElementById("btn-graph-stats")?.addEventListener("click", () => run("graph-notice", loadStats));
+    document.getElementById("btn-graph-document")?.addEventListener("click", () => run("graph-notice", loadDocumentGraph));
+    document.getElementById("btn-graph-entity")?.addEventListener("click", () => run("graph-notice", loadEntityGraph));
+    document.getElementById("btn-graph-subgraph")?.addEventListener("click", () => run("graph-notice", loadSubgraph));
+    document.getElementById("btn-graph-path")?.addEventListener("click", () => run("graph-notice", loadPath));
+    document.getElementById("graph-relation-filter")?.addEventListener("input", () => {
+      if (lastSubgraph) {
+        renderGraphCanvas("graph-canvas", lastSubgraph, selectedNodeId, syncSelection, currentGraphRelationFilter());
+      }
+    });
+    document.getElementById("graph-layout")?.addEventListener("change", () => {
+      if (lastSubgraph) {
+        renderGraphCanvas("graph-canvas", lastSubgraph, selectedNodeId, syncSelection, currentGraphRelationFilter());
+      }
+    });
+    document.getElementById("graph-preset")?.addEventListener("change", (event) => {
+      applyGraphPreset(event.target.value);
+      if (lastSubgraph) {
+        renderGraphCanvas("graph-canvas", lastSubgraph, selectedNodeId, syncSelection, currentGraphRelationFilter());
+      }
+    });
+    document.getElementById("graph-scale")?.addEventListener("change", () => {
+      if (lastSubgraph) {
+        renderGraphCanvas("graph-canvas", lastSubgraph, selectedNodeId, syncSelection, currentGraphRelationFilter());
+      }
+    });
+    document.getElementById("btn-graph-preset-explore")?.addEventListener("click", () => {
+      applyGraphPreset("explore");
+      if (lastSubgraph) {
+        renderGraphCanvas("graph-canvas", lastSubgraph, selectedNodeId, syncSelection, currentGraphRelationFilter());
+      }
+    });
+    document.getElementById("btn-graph-preset-dense")?.addEventListener("click", () => {
+      applyGraphPreset("dense");
+      if (lastSubgraph) {
+        renderGraphCanvas("graph-canvas", lastSubgraph, selectedNodeId, syncSelection, currentGraphRelationFilter());
+      }
+    });
+    document.getElementById("btn-graph-preset-path")?.addEventListener("click", () => {
+      applyGraphPreset("path");
+      if (lastSubgraph) {
+        renderGraphCanvas("graph-canvas", lastSubgraph, selectedNodeId, syncSelection, currentGraphRelationFilter());
+      }
+    });
+    document.getElementById("btn-graph-preset-entity")?.addEventListener("click", () => {
+      applyGraphPreset("entity");
+      if (lastSubgraph) {
+        renderGraphCanvas("graph-canvas", lastSubgraph, selectedNodeId, syncSelection, currentGraphRelationFilter());
+      }
+    });
+
+    run("graph-notice", loadStats);
+    const tenantInput = document.getElementById("graph-tenant-id");
+    if (tenantInput && !tenantInput.value) {
+      tenantInput.value = currentTenant();
+    }
   }
 
   function initTenants() {
@@ -4069,6 +4775,7 @@
     setBadges();
     setupNavigation();
     bindContext();
+    applyConfiguredDefaults();
     decorateContentShell();
 
     switch (document.body.dataset.page) {
@@ -4086,6 +4793,9 @@
         break;
       case "documents":
         initDocuments();
+        break;
+      case "graph":
+        initGraph();
         break;
       case "tenants":
         initTenants();

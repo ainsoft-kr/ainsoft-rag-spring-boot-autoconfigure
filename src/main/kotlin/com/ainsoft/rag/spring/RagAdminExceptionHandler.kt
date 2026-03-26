@@ -1,8 +1,10 @@
 package com.ainsoft.rag.spring
 
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.MissingServletRequestParameterException
+import org.springframework.web.HttpMediaTypeNotAcceptableException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 
@@ -25,6 +27,12 @@ class RagAdminExceptionHandler {
                 message = ex.message
             )
         )
+
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException::class)
+    fun handleNotAcceptable(ex: HttpMediaTypeNotAcceptableException): ResponseEntity<String> =
+        ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE)
+            .contentType(MediaType.TEXT_PLAIN)
+            .body(ex.message ?: "No acceptable representation")
 
     @ExceptionHandler(Exception::class)
     fun handleGeneric(ex: Exception): ResponseEntity<RagAdminApiErrorResponse> =

@@ -35,7 +35,8 @@ class RagAdminUiController(
         "access-security" to "access-security",
         "users" to "users",
         "config" to "config",
-        "bulk-operations" to "bulk-operations"
+        "bulk-operations" to "bulk-operations",
+        "graph" to "graph"
     )
 
     @ResponseBody
@@ -379,6 +380,10 @@ class RagAdminUiController(
             mapOf(
                 "basePath" to normalizePath(properties.basePath),
                 "apiBasePath" to normalizePath(properties.apiBasePath),
+                "defaultTenantId" to properties.defaultTenantId,
+                "defaultAclPrincipals" to properties.defaultAclPrincipals,
+                "defaultSearchPrincipals" to properties.defaultSearchPrincipals,
+                "defaultSearchQuery" to properties.defaultSearchQuery,
                 "defaultRecentProviderWindowMillis" to properties.defaultRecentProviderWindowMillis,
                 "securityEnabled" to properties.security.enabled,
                 "authenticated" to access.authenticated,

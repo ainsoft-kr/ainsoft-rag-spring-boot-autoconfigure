@@ -5,6 +5,7 @@ import com.fleeksoft.ksoup.parser.Parser
 import com.ainsoft.rag.support.SourceLoadOptions
 import com.ainsoft.rag.support.SourceLoaders
 import java.io.InputStreamReader
+import java.net.InetAddress
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
@@ -63,13 +64,21 @@ data class RagAdminWebPage(
     val text: String,
     val depth: Int,
     val source: String,
-    val links: List<String>
+    val links: List<String>,
+    val imageAltTexts: List<String> = emptyList(),
+    val tableSnippets: List<String> = emptyList()
 )
 
 data class RagAdminWebCrawlResult(
     val pages: List<RagAdminWebPage>,
     val progress: List<RagAdminWebIngestProgressEvent>,
     val failures: List<RagAdminWebIngestFailure>
+)
+
+private data class LoadResult(
+    val text: String?,
+    val reason: String? = null,
+    val effectiveUrl: String? = null
 )
 
 private data class RobotsRule(
@@ -150,7 +159,10 @@ class RagAdminWebCrawler {
         require(maxDepth >= 0) { "maxDepth must not be negative" }
 
         val normalizedSeeds = seedUrls.map(::normalizeWebUrl)
-        val seedHosts = normalizedSeeds.mapNotNull { URI(it).host?.lowercase() }.toSet()
+        val seedHosts = normalizedSeeds
+            .mapNotNull { URI(it).host?.lowercase() }
+            .flatMap { hostVariants(it) }
+            .toMutableSet()
         val normalizedAllowedDomains = allowedDomains.mapNotNull(::normalizeDomainEntry).toSet()
         val normalizedConfiguredAllowedHosts = configuredAllowedHosts.map { it.lowercase() }.toSet()
         val progress = mutableListOf<RagAdminWebIngestProgressEvent>()
@@ -279,97 +291,175 @@ class RagAdminWebCrawler {
                 continue
             }
 
-            ensureNotCancelled()
-            val html = loadHtml(
-                url = entry.url,
-                charset = charset,
-                timeout = timeout,
-                authHeaders = authHeaders,
-                insecureSkipTlsVerify = insecureSkipTlsVerify,
-                customCaCertPath = customCaCertPath,
-                userAgent = userAgent
-            )
-            if (html.isNullOrBlank()) {
+            try {
+                ensureNotCancelled()
+                val htmlResult = loadHtml(
+                    url = entry.url,
+                    charset = charset,
+                    timeout = timeout,
+                    authHeaders = authHeaders,
+                    insecureSkipTlsVerify = insecureSkipTlsVerify,
+                    customCaCertPath = customCaCertPath,
+                    userAgent = userAgent
+                )
+                val html = htmlResult.text
+                if (html.isNullOrBlank()) {
+                    failures += RagAdminWebIngestFailure(
+                        url = entry.url,
+                        depth = entry.depth,
+                        message = htmlResult.reason ?: "failed to load content"
+                    )
+                    emit(
+                        phase = "fetch",
+                        message = htmlResult.reason ?: "Failed to load content",
+                        url = entry.url,
+                        depth = entry.depth,
+                        current = current,
+                        total = sitemapUrls.size + normalizedSeeds.size
+                    )
+                    continue
+                }
+
+                val effectiveUrl = htmlResult.effectiveUrl ?: entry.url
+                URI(effectiveUrl).host?.lowercase()?.let { redirectedHost ->
+                    seedHosts += hostVariants(redirectedHost)
+                }
+
+                if (pages.any { it.url == effectiveUrl }) {
+                    current += 1
+                    emit(
+                        phase = "skip",
+                        message = "Skipped duplicate redirected url",
+                        url = effectiveUrl,
+                        depth = entry.depth,
+                        current = current,
+                        total = sitemapUrls.size + normalizedSeeds.size
+                    )
+                    continue
+                }
+
+                ensureNotCancelled()
+                val document = Ksoup.parse(html = html, baseUri = effectiveUrl)
+                document.select("script,style,noscript").remove()
+                val title = document.title().trim().takeIf { it.isNotBlank() }
+                val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()?.takeIf { it.isNotBlank() }
+                val bodyText = buildString {
+                    if (title != null) {
+                        appendLine(title)
+                        appendLine()
+                    }
+                    if (description != null) {
+                        appendLine(description)
+                        appendLine()
+                    }
+                    append(document.body().text().trim())
+                }.trim()
+                val imageAltTexts = document.select("img[alt], figure figcaption")
+                    .mapNotNull { element ->
+                        val value = when {
+                            element.hasAttr("alt") -> element.attr("alt")
+                            else -> element.text()
+                        }.trim()
+                        value.takeIf { it.isNotBlank() }
+                    }
+                    .distinct()
+                    .take(8)
+                val tableSnippets = document.select("table")
+                    .mapNotNull { table ->
+                        val caption = table.selectFirst("caption")?.text()?.trim()
+                        val rows = table.select("tr")
+                            .take(4)
+                            .mapNotNull { row ->
+                                row.select("th,td")
+                                    .take(4)
+                                    .joinToString(" / ") { it.text().trim() }
+                                    .takeIf { it.isNotBlank() }
+                            }
+                        if (caption.isNullOrBlank() && rows.isEmpty()) {
+                            null
+                        } else {
+                            buildString {
+                                caption?.let {
+                                    append(it)
+                                    if (rows.isNotEmpty()) append(": ")
+                                }
+                                append(rows.joinToString(" | "))
+                            }.trim().takeIf { it.isNotBlank() }
+                        }
+                    }
+                    .distinct()
+                    .take(6)
+                val links = if (entry.depth < maxDepth) {
+                    document.select("a[href]")
+                        .mapNotNull { element ->
+                            val href = element.absUrl("href").trim()
+                            if (!href.startsWith("http://") && !href.startsWith("https://")) {
+                                return@mapNotNull null
+                            }
+                            runCatching { normalizeWebUrl(href) }
+                                .getOrNull()
+                                ?.takeIf { candidate ->
+                                    isAllowedUrl(
+                                        url = candidate,
+                                        seedHosts = seedHosts,
+                                        allowedDomains = normalizedAllowedDomains,
+                                        configuredAllowedHosts = normalizedConfiguredAllowedHosts,
+                                        sameHostOnly = sameHostOnly
+                                    )
+                                }
+                        }
+                        .distinct()
+                } else {
+                    emptyList()
+                }
+
+                pages += RagAdminWebPage(
+                    url = effectiveUrl,
+                    title = title,
+                    description = description,
+                    text = bodyText.ifBlank { document.text().trim() },
+                    depth = entry.depth,
+                    source = entry.source,
+                    links = links,
+                    imageAltTexts = imageAltTexts,
+                    tableSnippets = tableSnippets
+                )
+                current += 1
+                emit(
+                    phase = "crawl",
+                    message = "Fetched page ${pages.size} of at most $maxPages",
+                    url = effectiveUrl,
+                    depth = entry.depth,
+                    current = current,
+                    total = sitemapUrls.size + normalizedSeeds.size
+                )
+
+                scheduled += effectiveUrl
+                links.forEach { link ->
+                    if (link !in scheduled && pages.size + queue.size < maxPages) {
+                        queue.add(WebQueueEntry(url = link, depth = entry.depth + 1, source = "link"))
+                        scheduled += link
+                    }
+                }
+            } catch (error: Exception) {
+                if (isCancelled()) {
+                    throw WebIngestCancelledException()
+                }
+                val reason = "${error::class.simpleName}: ${error.message ?: "page parse failed"}"
                 failures += RagAdminWebIngestFailure(
                     url = entry.url,
                     depth = entry.depth,
-                    message = "failed to load content"
+                    message = reason
                 )
                 emit(
-                    phase = "fetch",
-                    message = "Failed to load content",
+                    phase = "ingest-failed",
+                    message = reason,
                     url = entry.url,
                     depth = entry.depth,
                     current = current,
                     total = sitemapUrls.size + normalizedSeeds.size
                 )
                 continue
-            }
-
-            ensureNotCancelled()
-            val document = Ksoup.parse(html = html, baseUri = entry.url)
-            document.select("script,style,noscript").remove()
-            val title = document.title().trim().takeIf { it.isNotBlank() }
-            val description = document.selectFirst("meta[name=description]")?.attr("content")?.trim()?.takeIf { it.isNotBlank() }
-            val bodyText = buildString {
-                if (title != null) {
-                    appendLine(title)
-                    appendLine()
-                }
-                if (description != null) {
-                    appendLine(description)
-                    appendLine()
-                }
-                append(document.body().text().trim())
-            }.trim()
-            val links = if (entry.depth < maxDepth) {
-                document.select("a[href]")
-                    .mapNotNull { element ->
-                        val href = element.absUrl("href").trim()
-                        if (!href.startsWith("http://") && !href.startsWith("https://")) {
-                            return@mapNotNull null
-                        }
-                        runCatching { normalizeWebUrl(href) }
-                            .getOrNull()
-                            ?.takeIf { candidate ->
-                                isAllowedUrl(
-                                    url = candidate,
-                                    seedHosts = seedHosts,
-                                    allowedDomains = normalizedAllowedDomains,
-                                    configuredAllowedHosts = normalizedConfiguredAllowedHosts,
-                                    sameHostOnly = sameHostOnly
-                                )
-                            }
-                    }
-                    .distinct()
-            } else {
-                emptyList()
-            }
-
-            pages += RagAdminWebPage(
-                url = entry.url,
-                title = title,
-                description = description,
-                text = bodyText.ifBlank { document.text().trim() },
-                depth = entry.depth,
-                source = entry.source,
-                links = links
-            )
-            current += 1
-            emit(
-                phase = "crawl",
-                message = "Fetched page ${pages.size} of at most $maxPages",
-                url = entry.url,
-                depth = entry.depth,
-                current = current,
-                total = sitemapUrls.size + normalizedSeeds.size
-            )
-
-            links.forEach { link ->
-                if (link !in scheduled && pages.size + queue.size < maxPages) {
-                    queue.add(WebQueueEntry(url = link, depth = entry.depth + 1, source = "link"))
-                    scheduled += link
-                }
             }
         }
 
@@ -435,7 +525,7 @@ class RagAdminWebCrawler {
                 robots.sitemaps.forEach { discovered += normalizeWebUrl(it) }
             }
 
-            val xml = loadHtml(
+            val xmlResult = loadHtml(
                 url = sitemapUrl,
                 charset = charset,
                 timeout = timeout,
@@ -444,8 +534,16 @@ class RagAdminWebCrawler {
                 customCaCertPath = customCaCertPath,
                 userAgent = userAgent
             )
+            val xml = xmlResult.text
             if (xml.isNullOrBlank()) {
-                emit("sitemap", "No sitemap.xml found", sitemapUrl, null, index + 1, seedUrls.size)
+                emit(
+                    "sitemap",
+                    xmlResult.reason?.let { "Failed to load sitemap.xml: $it" } ?: "No sitemap.xml found",
+                    sitemapUrl,
+                    null,
+                    index + 1,
+                    seedUrls.size
+                )
                 return@forEachIndexed
             }
 
@@ -480,17 +578,51 @@ class RagAdminWebCrawler {
         insecureSkipTlsVerify: Boolean,
         customCaCertPath: String?,
         userAgent: String
-    ): String? = SourceLoaders.loadTextFromUri(
-        uriValue = url,
-        charset = charset,
-        options = SourceLoadOptions(
-            authHeaders = authHeaders.withUserAgent(userAgent),
-            timeout = timeout,
-            allowedHosts = emptySet(),
-            insecureSkipTlsVerify = insecureSkipTlsVerify,
-            customCaCertPath = customCaCertPath
-        )
-    )
+    ): LoadResult {
+        val candidates = urlCandidates(url)
+        var lastReason: String? = null
+        for (candidate in candidates) {
+            val hostReason = diagnoseHostResolution(candidate)
+            if (hostReason != null) {
+                lastReason = hostReason
+                continue
+            }
+            if (!insecureSkipTlsVerify && customCaCertPath.isNullOrBlank()) {
+                val direct = loadDirectText(
+                    url = candidate,
+                    charset = charset,
+                    timeout = timeout,
+                    authHeaders = authHeaders.withBrowserLikeHeaders(userAgent),
+                    expandHostVariants = false
+                )
+                if (!direct.text.isNullOrBlank()) {
+                    return direct
+                }
+                lastReason = direct.reason ?: lastReason
+            }
+            val text = try {
+                SourceLoaders.loadTextFromUri(
+                    uriValue = candidate,
+                    charset = charset,
+                    options = SourceLoadOptions(
+                        authHeaders = authHeaders.withBrowserLikeHeaders(userAgent),
+                        timeout = timeout,
+                        allowedHosts = emptySet(),
+                        insecureSkipTlsVerify = insecureSkipTlsVerify,
+                        customCaCertPath = customCaCertPath
+                    )
+                )
+            } catch (error: Exception) {
+                lastReason = "${error::class.simpleName}: ${error.message ?: "request failed"}"
+                null
+            }
+            if (!text.isNullOrBlank()) {
+                return LoadResult(text, null, candidate)
+            }
+            lastReason = "HTTP request returned no content or a non-2xx response from $candidate"
+        }
+        return LoadResult(null, lastReason ?: "HTTP request returned no content or a non-2xx response")
+    }
 
     private fun loadRobotsPolicy(
         seedUrl: String,
@@ -503,28 +635,25 @@ class RagAdminWebCrawler {
         emit: (String, String, String?, Int?, Int?, Int?) -> Unit
     ): RobotsPolicy {
         val robotsUrl = robotsUrlFor(seedUrl)
-        val text = SourceLoaders.loadTextFromUri(
-            uriValue = robotsUrl,
-            charset = charset,
-            options = SourceLoadOptions(
-                authHeaders = authHeaders.withUserAgent(userAgent),
-                timeout = timeout,
-                allowedHosts = emptySet(),
-                insecureSkipTlsVerify = insecureSkipTlsVerify,
-                customCaCertPath = customCaCertPath
-            )
-        ) ?: loadDirectText(
+        val textResult = loadDirectText(
             url = robotsUrl,
             charset = charset,
             timeout = timeout,
-            authHeaders = authHeaders.withUserAgent(userAgent)
+            authHeaders = authHeaders.withBrowserLikeHeaders(userAgent)
         )
-        if (text.isNullOrBlank()) {
-            emit("robots", "No robots.txt found", robotsUrl, null, null, null)
+        if (textResult.text.isNullOrBlank()) {
+            emit(
+                "robots",
+                textResult.reason?.let { "Failed to load robots.txt: $it" } ?: "No robots.txt found",
+                robotsUrl,
+                null,
+                null,
+                null
+            )
             return RobotsPolicy.empty()
         }
 
-        val policy = parseRobotsTxt(text)
+        val policy = parseRobotsTxt(textResult.text)
         emit(
             "robots",
             "Loaded robots.txt with ${policy.rules.size} rule groups",
@@ -586,7 +715,21 @@ fun webDocIdFromUrl(url: String): String {
     return "web-$hostPart-${pathPart.take(40)}-$digest"
 }
 
-fun buildWebNormalizedText(page: RagAdminWebPage): String = page.text.trim()
+fun buildWebNormalizedText(page: RagAdminWebPage): String = buildString {
+    append(page.text.trim())
+    if (page.imageAltTexts.isNotEmpty()) {
+        appendLine()
+        appendLine()
+        append("[image] ")
+        append(page.imageAltTexts.joinToString(" | "))
+    }
+    if (page.tableSnippets.isNotEmpty()) {
+        appendLine()
+        appendLine()
+        append("[table] ")
+        append(page.tableSnippets.joinToString(" | "))
+    }
+}.trim()
 
 fun webContentHash(page: RagAdminWebPage): String {
     val payload = webPreviewText(page.title, page.description, page.text)
@@ -616,8 +759,20 @@ fun buildWebMetadata(baseMetadata: Map<String, String>, page: RagAdminWebPage): 
         "crawl.url" to page.url,
         "crawl.depth" to page.depth.toString()
     )
+    val modalities = linkedSetOf("text")
     page.title?.takeIf { it.isNotBlank() }?.let { webMetadata["crawl.title"] = it }
     page.description?.takeIf { it.isNotBlank() }?.let { webMetadata["crawl.description"] = it }
+    if (page.imageAltTexts.isNotEmpty()) {
+        modalities += "image"
+        webMetadata["crawl.imageCount"] = page.imageAltTexts.size.toString()
+        webMetadata["crawl.imageHints"] = page.imageAltTexts.joinToString(" | ").take(240)
+    }
+    if (page.tableSnippets.isNotEmpty()) {
+        modalities += "table"
+        webMetadata["crawl.tableCount"] = page.tableSnippets.size.toString()
+        webMetadata["crawl.tableHints"] = page.tableSnippets.joinToString(" | ").take(320)
+    }
+    webMetadata["rag.modalities"] = modalities.joinToString(",")
     return baseMetadata + webMetadata
 }
 
@@ -725,30 +880,95 @@ private fun loadDirectText(
     url: String,
     charset: Charset,
     timeout: Duration,
-    authHeaders: Map<String, String>
-): String? {
-    val connection = runCatching { URL(url).openConnection() as HttpURLConnection }.getOrNull() ?: return null
-    return try {
-        connection.instanceFollowRedirects = true
-        connection.connectTimeout = timeout.toMillis().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        connection.readTimeout = timeout.toMillis().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        authHeaders.forEach { (key, value) ->
-            connection.setRequestProperty(key, value)
+    authHeaders: Map<String, String>,
+    expandHostVariants: Boolean = true
+): LoadResult {
+    val candidates = if (expandHostVariants) urlCandidates(url) else listOf(url)
+    var lastReason: String? = null
+    for (candidate in candidates) {
+        val hostReason = diagnoseHostResolution(candidate)
+        if (hostReason != null) {
+            lastReason = hostReason
+            continue
         }
-        connection.connect()
-        if (connection.responseCode !in 200..299) {
-            return null
-        }
-        connection.inputStream.use { inputStream ->
-            InputStreamReader(inputStream, charset).use { reader ->
-                reader.readText()
+        val connection = runCatching { URL(candidate).openConnection() as HttpURLConnection }
+            .getOrNull()
+            ?: run {
+                lastReason = "unable to open HTTP connection to $candidate"
+                continue
             }
+        try {
+            connection.instanceFollowRedirects = true
+            connection.connectTimeout = timeout.toMillis().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            connection.readTimeout = timeout.toMillis().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            authHeaders.forEach { (key, value) ->
+                connection.setRequestProperty(key, value)
+            }
+            connection.connect()
+            if (connection.responseCode !in 200..299) {
+                lastReason = "HTTP ${connection.responseCode} from $candidate"
+                continue
+            }
+            connection.inputStream.use { inputStream ->
+                InputStreamReader(inputStream, charset).use { reader ->
+                    return LoadResult(reader.readText(), null, connection.url.toString())
+                }
+            }
+        } catch (error: Exception) {
+            lastReason = "${error::class.simpleName}: ${error.message ?: "request failed"}"
+        } finally {
+            connection.disconnect()
         }
-    } catch (_: Exception) {
-        null
-    } finally {
-        connection.disconnect()
     }
+    return LoadResult(null, lastReason ?: "request failed")
+}
+
+private fun Map<String, String>.withBrowserLikeHeaders(userAgent: String): Map<String, String> {
+    val merged = linkedMapOf<String, String>()
+    merged["User-Agent"] = userAgent.ifBlank { "Mozilla/5.0 (compatible; AinsoftRagBot/1.0)" }
+    merged["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    merged["Accept-Language"] = "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
+    merged["Cache-Control"] = "no-cache"
+    merged["Pragma"] = "no-cache"
+    merged.putAll(this)
+    return merged
+}
+
+private fun diagnoseHostResolution(url: String): String? {
+    val host = runCatching { URI(url).host?.lowercase() }.getOrNull() ?: return "invalid url host"
+    return runCatching { InetAddress.getByName(host) }
+        .exceptionOrNull()
+        ?.let { error -> "DNS resolution failed for host '$host': ${error.message ?: error::class.simpleName}" }
+}
+
+private fun urlCandidates(url: String): List<String> {
+    val uri = runCatching { URI(url) }.getOrNull() ?: return listOf(url)
+    val host = uri.host?.lowercase().orEmpty()
+    if (host.isBlank()) return listOf(url)
+    return hostVariants(host).map { candidateHost ->
+        URI(
+            uri.scheme,
+            uri.userInfo,
+            candidateHost,
+            uri.port,
+            uri.path,
+            uri.query,
+            uri.fragment
+        ).toString()
+    }.distinct()
+}
+
+private fun hostVariants(host: String): List<String> {
+    val normalized = host.trim().lowercase()
+    if (normalized.isBlank()) return emptyList()
+    if (normalized == "localhost" || normalized.matches(Regex("""\d{1,3}(\.\d{1,3}){3}"""))) {
+        return listOf(normalized)
+    }
+    return if (normalized.startsWith("www.")) {
+        listOf(normalized, normalized.removePrefix("www."))
+    } else {
+        listOf(normalized, "www.$normalized")
+    }.distinct()
 }
 
 private fun normalizeRobotsPattern(pattern: String): String {

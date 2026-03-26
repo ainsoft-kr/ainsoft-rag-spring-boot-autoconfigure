@@ -9,6 +9,8 @@ import com.ainsoft.rag.api.SearchResponse
 import com.ainsoft.rag.api.SearchTelemetry
 import com.ainsoft.rag.api.UpsertDocumentRequest
 import com.ainsoft.rag.embeddings.EmbeddingProvider
+import com.ainsoft.rag.graph.GraphProjectionService
+import com.ainsoft.rag.graph.InMemoryGraphStore
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -49,12 +51,20 @@ class RagAdminAutoConfigurationTest {
             .withPropertyValues(
                 "rag.admin.base-path=/console/rag",
                 "rag.admin.api-base-path=/internal/rag-admin",
+                "rag.admin.default-tenant-id=tenant-web-demo",
+                "rag.admin.default-acl-principals[0]=group:demo",
+                "rag.admin.default-search-principals[0]=group:demo",
+                "rag.admin.default-search-query=hybrid retrieval",
                 "rag.admin.default-recent-provider-window-millis=12345"
             )
             .run { context ->
                 val html = context.getBean(RagAdminUiController::class.java).index(MockHttpServletRequest())
                 assertTrue(html.contains("\"basePath\":\"/console/rag\""))
                 assertTrue(html.contains("\"apiBasePath\":\"/internal/rag-admin\""))
+                assertTrue(html.contains("\"defaultTenantId\":\"tenant-web-demo\""))
+                assertTrue(html.contains("\"defaultAclPrincipals\":[\"group:demo\"]"))
+                assertTrue(html.contains("\"defaultSearchPrincipals\":[\"group:demo\"]"))
+                assertTrue(html.contains("\"defaultSearchQuery\":\"hybrid retrieval\""))
                 assertTrue(html.contains("\"defaultRecentProviderWindowMillis\":12345"))
                 assertTrue(html.contains("href=\"/console/rag/assets/app.css\""))
                 assertTrue(html.contains("src=\"/console/rag/assets/app.js\""))
@@ -90,6 +100,12 @@ private class TestBeans {
 
     @Bean
     fun ragComponents(): RagComponents = RagComponents()
+
+    @Bean
+    fun graphStore(): InMemoryGraphStore = InMemoryGraphStore()
+
+    @Bean
+    fun graphProjectionService(): GraphProjectionService = GraphProjectionService()
 
     @Bean
     fun ragEngine(): RagEngine = object : RagEngine {

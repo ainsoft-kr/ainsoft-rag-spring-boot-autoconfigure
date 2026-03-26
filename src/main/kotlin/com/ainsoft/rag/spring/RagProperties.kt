@@ -67,6 +67,20 @@ data class RagProperties(
     val summarizerApiKey: String? = null,
     val summarizerModel: String = "gpt-4o-mini",
     val summarizerRequestTimeoutMillis: Long = 30_000,
+    val graphRetrievalEnabled: Boolean = false,
+    val graphRetrievalExpandDepth: Int = 2,
+    val graphRetrievalMaxSeedDocuments: Int = 3,
+    val graphRetrievalMaxEntityMatches: Int = 4,
+    val graphRetrievalMaxDocumentMatches: Int = 4,
+    val graphRetrievalMaxExpansionTerms: Int = 12,
+    val graphRetrievalScoreBoost: Double = 0.08,
+    val multimodalRetrievalEnabled: Boolean = true,
+    val multimodalRetrievalScoreWeight: Double = 0.18,
+    val lateInteractionEnabled: Boolean = false,
+    val lateInteractionScoreWeight: Double = 0.24,
+    val lateInteractionMaxQueryTerms: Int = 6,
+    val lateInteractionWindowChars: Int = 220,
+    val lateInteractionMaxCandidateWindows: Int = 4,
     val statsCacheStoreType: String = "memory",
     val statsCacheFilePath: String? = null,
     val statsCacheFileMaxBytes: Long = 0L,
@@ -107,7 +121,14 @@ data class RagProperties(
     val embeddingProvider: String = "hash",
     val openAiApiKey: String? = null,
     val openAiModel: String = "text-embedding-3-small",
-    val openAiBaseUrl: String = "https://api.openai.com/v1"
+    val openAiBaseUrl: String = "https://api.openai.com/v1",
+    val graphProvider: String = "falkordb",
+    val graphFalkorHost: String = "127.0.0.1",
+    val graphFalkorPort: Int = 6379,
+    val graphFalkorUsername: String? = null,
+    val graphFalkorPassword: String? = null,
+    val graphFalkorGraphNamePrefix: String = "rag",
+    val graphFallbackToMemory: Boolean = true
 ) {
     fun resolveSourceLoadProfile(profileName: String?): SourceLoadProfile {
         val requestedName = profileName?.takeIf { it.isNotBlank() } ?: sourceLoadDefaultProfile
