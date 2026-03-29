@@ -28,9 +28,11 @@ import com.ainsoft.rag.chunking.Chunkers
 import com.ainsoft.rag.chunking.RegexChunking
 import com.ainsoft.rag.chunking.SlidingWindowChunking
 import com.ainsoft.rag.embeddings.EmbeddingProvider
+import com.ainsoft.rag.embeddings.GoogleEmbeddingProvider
 import com.ainsoft.rag.embeddings.OpenAiEmbeddingProvider
 import com.ainsoft.rag.impl.CompositeProviderHealthExportHook
 import com.ainsoft.rag.impl.ProviderHealthAutoExportLifecycle
+import com.ainsoft.rag.impl.SearchEnhancerFactory
 import com.ainsoft.rag.impl.createProviderHealthExportHook
 import com.ainsoft.rag.impl.createProviderHealthPushExportHook
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -92,7 +94,7 @@ class RagAutoConfiguration {
                     minResultsBeforeSkip = props.correctiveMinResultsBeforeSkip,
                     expandedCandidateMultiplier = props.correctiveExpandedCandidateMultiplier,
                     queryRewriteEnabled = props.queryRewriteEnabled,
-                    queryRewriterType = if (queryRewriteConfig != null) "openai-compatible" else props.queryRewriterType,
+                    queryRewriterType = if (queryRewriteConfig != null) "llm" else props.queryRewriterType,
                     queryRewriteApiBaseUrl = queryRewriteConfig?.baseUrl ?: props.queryRewriteApiBaseUrl,
                     queryRewriteApiKey = queryRewriteConfig?.apiKey ?: props.queryRewriteApiKey,
                     queryRewriteModel = queryRewriteConfig?.model ?: props.queryRewriteModel,
@@ -104,7 +106,7 @@ class RagAutoConfiguration {
                     maxSectionSummaries = props.hierarchicalMaxSectionSummaries,
                     maxSummaryChars = props.hierarchicalMaxSummaryChars,
                     targetChunksPerSection = props.hierarchicalTargetChunksPerSection,
-                    summarizerType = if (summarizerConfig != null) "openai-compatible" else props.summarizerType,
+                    summarizerType = if (summarizerConfig != null) "llm" else props.summarizerType,
                     summarizerApiBaseUrl = summarizerConfig?.baseUrl ?: props.summarizerApiBaseUrl,
                     summarizerApiKey = summarizerConfig?.apiKey ?: props.summarizerApiKey,
                     summarizerModel = summarizerConfig?.model ?: props.summarizerModel,
@@ -171,8 +173,26 @@ class RagAutoConfiguration {
                 )
             }
 
+            "google", "gemini" -> {
+                val apiKey = props.googleApiKey?.takeIf { it.isNotBlank() }
+                    ?: (if (llmEmbedding?.kind?.lowercase()?.contains("google") == true || llmEmbedding?.kind?.lowercase()?.contains("gemini") == true) llmEmbedding.apiKey else null)
+                    ?: System.getenv("GEMINI_API_KEY")?.takeIf { it.isNotBlank() }
+                    ?: System.getenv("GOOGLE_API_KEY")?.takeIf { it.isNotBlank() }
+                    ?: error(
+                        "Google embedding provider requires rag.googleApiKey, GEMINI_API_KEY or GOOGLE_API_KEY env variable"
+                    )
+
+                GoogleEmbeddingProvider(
+                    apiKey = apiKey,
+                    model = props.googleModel, // Always prioritize explicit embedding model
+                    dimensions = props.embeddingDimensions,
+                    baseUrl = (if (llmEmbedding?.kind?.lowercase()?.contains("google") == true || llmEmbedding?.kind?.lowercase()?.contains("gemini") == true) llmEmbedding.baseUrl else null)
+                        ?: props.googleBaseUrl
+                )
+            }
+
             else -> error(
-                "Unsupported rag.embeddingProvider='${props.embeddingProvider}'. Supported: hash, openai"
+                "Unsupported rag.embeddingProvider='${props.embeddingProvider}'. Supported: hash, openai, google"
             )
         }
     }
@@ -228,6 +248,39 @@ class RagAutoConfiguration {
         },
         components
     )
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun queryRewriter(
+        props: RagProperties,
+        config: RagConfig,
+        textGenerationProviderFactory: TextGenerationProviderFactory
+    ): QueryRewriter {
+        val llmConfig = props.llm.resolveQueryRewrite()
+        val provider = llmConfig?.let { textGenerationProviderFactory.create(it) }
+        return SearchEnhancerFactory.createQueryRewriter(config.options.correctiveRetrieval, provider)
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun summarizer(
+        props: RagProperties,
+        config: RagConfig,
+        textGenerationProviderFactory: TextGenerationProviderFactory
+    ): DocumentSummarizer {
+        val llmConfig = props.llm.resolveSummarizer()
+        val provider = llmConfig?.let { textGenerationProviderFactory.create(it) }
+        return SearchEnhancerFactory.createSummarizer(config.options.hierarchicalSummaries, provider)
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun reranker(
+        config: RagConfig,
+        embeddingProvider: EmbeddingProvider
+    ): ResultReranker {
+        return SearchEnhancerFactory.createReranker(config.options.reranker, embeddingProvider)
+    }
 
     @Bean
     @ConditionalOnMissingBean
