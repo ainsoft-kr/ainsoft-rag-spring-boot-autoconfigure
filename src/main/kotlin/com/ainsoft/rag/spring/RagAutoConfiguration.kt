@@ -19,6 +19,7 @@ import com.ainsoft.rag.api.ResultReranker
 import com.ainsoft.rag.api.SearchPipeline
 import com.ainsoft.rag.api.TextGenerationProviderFactory
 import com.ainsoft.rag.api.RerankerOptions
+import com.ainsoft.rag.impl.AgenticTreeSearchConfig
 import com.ainsoft.rag.cache.InMemoryStatsCacheStore
 import com.ainsoft.rag.cache.StatsCacheStore
 import com.ainsoft.rag.cache.file.JsonFileStatsCacheStore
@@ -55,10 +56,19 @@ class RagAutoConfiguration {
         val summarizerConfig = props.llm.resolveSummarizer()
         val path = Path.of(props.indexPath)
         path.createDirectories()
+        
+        val defaultHybrid = RagOptions().hybrid
+        val effectiveHybrid = if (props.search.vector.enabled) {
+            defaultHybrid
+        } else {
+            defaultHybrid.copy(vectorTopN = 0) // 벡터 검색 비활성화
+        }
+
         return RagConfig(
             indexPath = path,
             options = RagOptions(
                 storeChunkText = props.storeChunkText,
+                hybrid = effectiveHybrid,
                 statsCacheTtlMillis = props.statsCacheTtlMillis,
                 statsCacheMaxEntries = props.statsCacheMaxEntries,
                 statsCacheMaxEntriesPerTenant = props.statsCacheMaxEntriesPerTenant,
@@ -280,6 +290,28 @@ class RagAutoConfiguration {
         embeddingProvider: EmbeddingProvider
     ): ResultReranker {
         return SearchEnhancerFactory.createReranker(config.options.reranker, embeddingProvider)
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    fun searchPipeline(
+        props: RagProperties,
+        textGenerationProviderFactory: TextGenerationProviderFactory
+    ): SearchPipeline? {
+        if (!props.search.agentic.enabled) return null
+        
+        val llmConfig = props.llm.resolveAgenticSearch() 
+            ?: props.llm.resolveSummarizer() 
+            ?: error("Agentic tree search requires LLM configuration (rag.llm.agentic-search or rag.llm.summarizer)")
+            
+        val provider = textGenerationProviderFactory.create(llmConfig)
+        return SearchEnhancerFactory.createAgenticTreeSearchPipeline(
+            llm = provider,
+            config = AgenticTreeSearchConfig(
+                maxDocsToExplore = props.search.agentic.maxDocsToExplore,
+                maxChunksPerDoc = props.search.agentic.maxChunksPerDoc
+            )
+        )
     }
 
     @Bean

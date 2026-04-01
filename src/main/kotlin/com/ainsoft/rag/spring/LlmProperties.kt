@@ -10,12 +10,15 @@ data class LlmProperties(
     val providers: Map<String, LlmProviderDefinition> = emptyMap(),
     val queryRewrite: LlmBindingProperties = LlmBindingProperties(),
     val summarizer: LlmBindingProperties = LlmBindingProperties(),
+    val agenticSearch: LlmBindingProperties = LlmBindingProperties(),
     val embedding: LlmBindingProperties = LlmBindingProperties(),
     val graphExtraction: LlmBindingProperties = LlmBindingProperties()
 ) {
     fun resolveQueryRewrite(): LlmProviderConfig? = resolveBinding(queryRewrite)
 
     fun resolveSummarizer(): LlmProviderConfig? = resolveBinding(summarizer)
+
+    fun resolveAgenticSearch(): LlmProviderConfig? = resolveBinding(agenticSearch)
 
     fun resolveEmbedding(): LlmProviderConfig? = resolveBinding(embedding)
 

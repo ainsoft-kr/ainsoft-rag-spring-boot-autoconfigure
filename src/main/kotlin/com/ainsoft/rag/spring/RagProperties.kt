@@ -81,6 +81,7 @@ data class RagProperties(
     val lateInteractionMaxQueryTerms: Int = 6,
     val lateInteractionWindowChars: Int = 220,
     val lateInteractionMaxCandidateWindows: Int = 4,
+    val search: SearchProperties = SearchProperties(),
     val statsCacheStoreType: String = "memory",
     val statsCacheFilePath: String? = null,
     val statsCacheFileMaxBytes: Long = 0L,
@@ -150,6 +151,22 @@ data class RagProperties(
     fun resolvedStatsCacheFilePath(): Path =
         Path.of(statsCacheFilePath ?: Path.of(indexPath).resolve("stats-cache.json").toString())
 }
+
+data class SearchProperties(
+    val agentic: AgenticSearchProperties = AgenticSearchProperties(),
+    val vector: VectorSearchProperties = VectorSearchProperties()
+)
+
+data class AgenticSearchProperties(
+    val enabled: Boolean = false,
+    val maxDocsToExplore: Int = 3,
+    val maxChunksPerDoc: Int = 5
+)
+
+data class VectorSearchProperties(
+    val enabled: Boolean = true,
+    val useHybrid: Boolean = true
+)
 
 data class SourceLoadProfile(
     val timeoutMillis: Long? = null,
